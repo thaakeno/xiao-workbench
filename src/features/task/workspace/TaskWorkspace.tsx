@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import {
@@ -21,6 +21,7 @@ import type { FocusView } from "../../focus-rail/focus-rail.types";
 import { Composer } from "../composer/Composer";
 import { TaskTimeline } from "../timeline/TaskTimeline";
 import { TaskHeader } from "./TaskHeader";
+import { MessageNavigator } from "./MessageNavigator";
 import "../styles/task.css";
 
 type TaskWorkspaceProps = {
@@ -54,6 +55,7 @@ type TaskWorkspaceProps = {
   contextUsage: ThreadTokenUsage | null;
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
+  showChatExport: boolean;
   historyHasMore: boolean;
   historyLoadingOlder: boolean;
   workspace: WorkspaceSnapshot;
@@ -122,6 +124,7 @@ export function TaskWorkspace({
   contextUsage,
   showReasoningSummaries,
   expandToolOutput,
+  showChatExport,
   historyHasMore,
   historyLoadingOlder,
   workspace,
@@ -151,6 +154,7 @@ export function TaskWorkspace({
   onLoadOlderHistory,
 }: TaskWorkspaceProps) {
   const scrollArea = useRef<HTMLDivElement>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const followLiveOutput = useRef(true);
   const previousWorking = useRef(false);
   const taskWorking = runtime.phase === "working" && runtime.taskId === taskId;
@@ -167,7 +171,19 @@ export function TaskWorkspace({
     }
     previousWorking.current = taskWorking;
     if (followLiveOutput.current) node.scrollTop = node.scrollHeight;
+    setShowScrollBottom(node.scrollHeight - node.scrollTop - node.clientHeight >= 120);
   }, [taskId, taskWorking, timeline]);
+
+  const scrollToEntry = (entryId: string) => {
+    document.getElementById(`timeline-entry-${entryId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  const scrollToBottom = () => {
+    const node = scrollArea.current;
+    if (!node) return;
+    followLiveOutput.current = true;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  };
 
   const composer = (
     <Composer
@@ -269,6 +285,8 @@ export function TaskWorkspace({
         archiveDisabled={Boolean(taskStateError)}
         canUndo={canUndo}
         undoing={undoing}
+        timeline={timeline}
+        showChatExport={showChatExport}
         onFocusView={onFocusView}
         onToggleArchived={onToggleArchived}
         onUndo={onUndo}
@@ -279,9 +297,11 @@ export function TaskWorkspace({
         onScroll={(event) => {
           const node = event.currentTarget;
           followLiveOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+          setShowScrollBottom(!followLiveOutput.current);
         }}
       >
       <TaskTimeline
+          key={taskId}
           taskId={taskId}
           timeline={timeline}
           runtime={runtime}
@@ -297,6 +317,8 @@ export function TaskWorkspace({
         onLoadOlderHistory={onLoadOlderHistory}
       />
       </div>
+      <MessageNavigator timeline={timeline} onJump={scrollToEntry} />
+      {showScrollBottom ? <button className="task-scroll-bottom" type="button" aria-label="Scroll to latest message" title="Scroll to bottom" onClick={scrollToBottom}><XiaoIcon name="send" size={16} /></button> : null}
       {composer}
     </section>
   );

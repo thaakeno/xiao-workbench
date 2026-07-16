@@ -10,7 +10,7 @@ export type AgentMessage = {
 };
 
 export type AgentExplorationAction = {
-  kind: "list" | "read" | "search";
+  kind: "command" | "list" | "read" | "search" | "web";
   command: string;
   label: string;
   path?: string;
@@ -218,6 +218,12 @@ export type CodexThreadSummary = {
   createdAt: number;
   updatedAt: number;
   archived: boolean;
+};
+
+export type ThreadChangeSummary = {
+  files: number;
+  additions: number;
+  deletions: number;
 };
 
 export type AgentThreadTokenUsage = TokenUsageBreakdown & {

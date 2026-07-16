@@ -1,7 +1,8 @@
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
-import type { AgentRuntimeState, RuntimePhase } from "../../../core/models/agent";
+import type { AgentRuntimeState, RuntimePhase, TimelineEntry } from "../../../core/models/agent";
 import type { WorkspaceSnapshot } from "../../../core/models/workspace";
 import type { FocusView } from "../../focus-rail/focus-rail.types";
+import { ChatExportMenu } from "./ChatExportMenu";
 
 type TaskHeaderProps = {
   taskId: string;
@@ -13,6 +14,8 @@ type TaskHeaderProps = {
   archiveDisabled: boolean;
   canUndo: boolean;
   undoing: boolean;
+  timeline: TimelineEntry[];
+  showChatExport: boolean;
   onFocusView: (view: FocusView) => void;
   onToggleArchived: () => void;
   onUndo: () => void;
@@ -36,6 +39,8 @@ export function TaskHeader({
   archiveDisabled,
   canUndo,
   undoing,
+  timeline,
+  showChatExport,
   onFocusView,
   onToggleArchived,
   onUndo,
@@ -57,6 +62,7 @@ export function TaskHeader({
       </div>
 
       <div className="task-header__actions">
+        {showChatExport ? <ChatExportMenu title={taskTitle} timeline={timeline} /> : null}
         <span
           className={`task-header__runtime task-header__runtime--${runtime.phase}`}
           role="status"

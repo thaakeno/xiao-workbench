@@ -27,6 +27,7 @@ describe("normalizeAppPreferences", () => {
 
     expect(preferences).toEqual({
       importCodexHistory: true,
+      showChatExport: true,
       showReasoningSummaries: false,
       expandToolOutput: true,
       focusNewTasks: false,

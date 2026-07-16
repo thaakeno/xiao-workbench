@@ -67,6 +67,7 @@ const shortcuts = [
   { action: "New task", keys: ["Ctrl", "N"] },
   { action: "Search and commands", keys: ["Ctrl", "K"] },
   { action: "Open runtime", keys: ["Ctrl", "`"] },
+  { action: "Open terminal", keys: ["Ctrl", "J"] },
   { action: "Send prompt", keys: ["Enter"] },
   { action: "New line in prompt", keys: ["Shift", "Enter"] },
   { action: "Paste image", keys: ["Ctrl", "V"] },
@@ -228,6 +229,7 @@ export function SettingsPage({
                   <SettingRow title="Codex history" description="Show persisted Codex conversations for projects you have already added to Xiao."><Toggle label="Import Codex history" checked={preferences.importCodexHistory} onChange={(importCodexHistory) => onPreferencesChange({ importCodexHistory })} /></SettingRow>
                   <SettingRow title="Reasoning summaries" description="Show the reasoning summaries Codex explicitly publishes. Hidden reasoning is never inferred."><Toggle label="Reasoning summaries" checked={preferences.showReasoningSummaries} onChange={(showReasoningSummaries) => onPreferencesChange({ showReasoningSummaries })} /></SettingRow>
                   <SettingRow title="Expand tool output" description="Open command output and patch details by default. Active tools always stay visible."><Toggle label="Expand tool output" checked={preferences.expandToolOutput} onChange={(expandToolOutput) => onPreferencesChange({ expandToolOutput })} /></SettingRow>
+                  <SettingRow title="Copy and export" description="Show the chat export menu in the task header. Export filters stay local to the open menu."><Toggle label="Show chat copy and export" checked={preferences.showChatExport} onChange={(showChatExport) => onPreferencesChange({ showChatExport })} /></SettingRow>
                 </div>
               </div>
               <div className="settings-block">

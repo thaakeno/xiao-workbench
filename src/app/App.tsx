@@ -9,12 +9,14 @@ import type {
   AgentThreadTokenUsage,
   AgentTurnOutcome,
   CodexThreadSummary,
+  ThreadChangeSummary,
   TimelineEntry,
 } from "../core/models/agent";
 import type { XiaoProjectSummary, XiaoWorkspaceDocument } from "../core/models/xiao";
 import { titleFromPrompt, useAgentRuntime } from "../features/agent/hooks/useAgentRuntime";
 import {
   listCodexThreads,
+  readCodexThreadChangeSummary,
   readCodexThreadTimeline,
   sameWorkspacePath,
 } from "../features/agent/history/codexHistory";
@@ -62,6 +64,7 @@ const activeProjectStorageKey = "xiao.active-project.v1";
 const projectSnapshotStorageKey = "xiao.project-snapshot.v1";
 const codexThreadSnapshotStorageKey = "xiao.codex-thread-snapshot.v1";
 const usageSnapshotStorageKey = "xiao.usage-snapshot.v1";
+const changeSummarySnapshotStorageKey = "xiao.thread-change-summaries.v1";
 const scheduleStorageKey = (workspacePath: string) => `xiao.schedules.v1:${workspacePath}`;
 const projectPathKey = (path: string) => path.replace(/[\\/]+$/, "").toLocaleLowerCase();
 const readSnapshot = <T,>(key: string, fallback: T): T => {
@@ -521,6 +524,9 @@ export function App() {
   const [threadTokenUsage, setThreadTokenUsage] = useState<AgentThreadTokenUsage[]>(() =>
     readSnapshot(usageSnapshotStorageKey, []),
   );
+  const [threadChangeSummaries, setThreadChangeSummaries] = useState<Record<string, ThreadChangeSummary | null>>(() =>
+    readSnapshot(changeSummarySnapshotStorageKey, {}),
+  );
   const codexHistoryRefreshRef = useRef(0);
   const loadingCodexThreadsRef = useRef(new Set<string>());
   const pendingCodexThreadRef = useRef<string | null>(null);
@@ -545,6 +551,7 @@ export function App() {
     taskWorkspacePath === workspace.path &&
     activePage === "tasks" &&
     selectedTask != null &&
+    selectedTask.origin !== "codex" &&
     !selectedTask.archived &&
     activeTask.timeline.length === 0;
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -954,6 +961,35 @@ export function App() {
     );
     setTasks((current) => mergeCodexTasks(current, workspaceThreads));
   }, [codexThreads, preferences.importCodexHistory, taskStateReady, taskWorkspacePath, workspace.path]);
+
+  useEffect(() => {
+    if (agent.runtime.phase !== "ready" || !preferences.importCodexHistory || !workspace.path) return;
+    const pending = codexThreads
+      .filter((thread) => !thread.archived && sameWorkspacePath(thread.cwd, workspace.path))
+      .filter((thread) => !(thread.id in threadChangeSummaries))
+      .slice(0, 40);
+    if (!pending.length) return;
+    let cancelled = false;
+    const queue = [...pending];
+    const discovered: Record<string, ThreadChangeSummary | null> = {};
+    const worker = async () => {
+      while (!cancelled) {
+        const thread = queue.shift();
+        if (!thread) return;
+        try { discovered[thread.id] = await readCodexThreadChangeSummary(thread.id); }
+        catch { discovered[thread.id] = null; }
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker)).then(() => {
+      if (cancelled) return;
+      setThreadChangeSummaries((current) => {
+        const next = { ...current, ...discovered };
+        writeSnapshot(changeSummarySnapshotStorageKey, next);
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [agent.runtime.phase, codexThreads, preferences.importCodexHistory, threadChangeSummaries, workspace.path]);
 
   useEffect(() => {
     if (
@@ -1762,6 +1798,10 @@ export function App() {
         event.preventDefault();
         openFocusView("runtime");
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        openFocusView("terminal");
+      }
       if (event.key === "Escape") setCommandMenuOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1809,6 +1849,7 @@ export function App() {
             rateLimits={agent.rateLimits}
             codexThreads={preferences.importCodexHistory ? codexThreads : []}
             threadTokenUsage={threadTokenUsage}
+            threadChangeSummaries={threadChangeSummaries}
             profile={profile}
             canOpenProjects={isTauriHost()}
             onOpenSidebar={openSidebar}
@@ -1844,6 +1885,15 @@ export function App() {
             }}
             onSelectCodexThread={(thread) => {
               if (agent.runtime.phase === "working") return;
+              const taskId = `codex:${thread.id}`;
+              if (sameWorkspacePath(workspace.path, thread.cwd)) {
+                setActiveTaskId(taskId);
+                setOpenTaskIds((current) => current.includes(taskId) ? current : [...current, taskId]);
+                setDraftTabOpen(false);
+                setActivePage("tasks");
+                closeSidebarOnNarrow();
+                return;
+              }
               pendingCodexThreadRef.current = thread.id;
               setTaskWorkspacePath("");
               setActiveProjectPath(thread.cwd);
@@ -1934,6 +1984,7 @@ export function App() {
               contextUsage={agent.contextUsage}
               showReasoningSummaries={preferences.showReasoningSummaries}
               expandToolOutput={preferences.expandToolOutput}
+              showChatExport={preferences.showChatExport}
               historyHasMore={Boolean(activeTask.historyCursor)}
               historyLoadingOlder={Boolean(activeTask.historyLoadingOlder)}
               workspace={workspace}

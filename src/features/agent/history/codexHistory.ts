@@ -2,6 +2,7 @@ import { nativeBridge } from "../../../core/bridges/tauri";
 import type {
   AgentAttachment,
   CodexThreadSummary,
+  ThreadChangeSummary,
   TimelineEntry,
 } from "../../../core/models/agent";
 import { timelineEntryFromItem } from "../hooks/useAgentRuntime";
@@ -154,6 +155,55 @@ const diffForTurn = (items: Record<string, unknown>[]) => {
 export type CodexThreadPage = {
   timeline: TimelineEntry[];
   nextCursor: string | null;
+};
+
+export const readCodexThreadChangeSummary = async (
+  threadId: string,
+): Promise<ThreadChangeSummary | null> => {
+  const response = await nativeBridge.agentRequest<{ data?: unknown }>("thread/turns/list", {
+    threadId,
+    // The newest turn is often only a question or status update. A small tail
+    // finds the latest actual edit without loading the complete conversation.
+    limit: 6,
+    sortDirection: "desc",
+    itemsView: "full",
+  });
+  const turns = Array.isArray(response.data) ? response.data : [];
+  for (const turn of turns) {
+    if (!turn || typeof turn !== "object") continue;
+    const items = Array.isArray((turn as Record<string, unknown>).items)
+      ? (turn as Record<string, unknown>).items as unknown[]
+      : [];
+    const files = new Map<string, { additions: number; deletions: number }>();
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const value = item as Record<string, unknown>;
+      if (value.type !== "fileChange" || !Array.isArray(value.changes)) continue;
+      for (const change of value.changes) {
+        if (!change || typeof change !== "object") continue;
+        const detail = change as Record<string, unknown>;
+        if (typeof detail.path !== "string") continue;
+        const diff = typeof detail.diff === "string" ? detail.diff : "";
+        let additions = 0;
+        let deletions = 0;
+        for (const line of diff.replace(/\r\n?/g, "\n").split("\n")) {
+          if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+          if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+        }
+        const previous = files.get(detail.path) ?? { additions: 0, deletions: 0 };
+        files.set(detail.path, {
+          additions: previous.additions + additions,
+          deletions: previous.deletions + deletions,
+        });
+      }
+    }
+    if (files.size) return {
+      files: files.size,
+      additions: [...files.values()].reduce((sum, file) => sum + file.additions, 0),
+      deletions: [...files.values()].reduce((sum, file) => sum + file.deletions, 0),
+    };
+  }
+  return null;
 };
 
 export const readCodexThreadTimeline = async (

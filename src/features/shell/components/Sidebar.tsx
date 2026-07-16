@@ -14,6 +14,7 @@ import type {
   AgentRuntimeState,
   AgentThreadTokenUsage,
   CodexThreadSummary,
+  ThreadChangeSummary,
 } from "../../../core/models/agent";
 import type { WorkspaceSnapshot } from "../../../core/models/workspace";
 import type { XiaoProjectSummary } from "../../../core/models/xiao";
@@ -34,6 +35,7 @@ type SidebarProps = {
   rateLimits: AgentRateLimits | null;
   codexThreads: CodexThreadSummary[];
   threadTokenUsage: AgentThreadTokenUsage[];
+  threadChangeSummaries: Record<string, ThreadChangeSummary | null>;
   profile: LocalUserProfile;
   canOpenProjects: boolean;
   onOpenSidebar: () => void;
@@ -123,16 +125,15 @@ const groupForTask = (task: WorkbenchTask, activeTaskId: string, now: number) =>
   return monthGroupFormatter.format(taskDate);
 };
 
-const taskChangeSummary = (task: WorkbenchTask) => {
+const taskChangeSummary = (task: WorkbenchTask, fallback?: ThreadChangeSummary | null) => {
   for (let index = task.timeline.length - 1; index >= 0; index -= 1) {
     const files = task.timeline[index]?.files;
     if (!files?.length) continue;
-    return {
-      additions: files.reduce((sum, file) => sum + file.additions, 0),
-      deletions: files.reduce((sum, file) => sum + file.deletions, 0),
-    };
+    const additions = files.reduce((sum, file) => sum + file.additions, 0);
+    const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+    return additions || deletions ? { additions, deletions } : null;
   }
-  return null;
+  return fallback ?? null;
 };
 
 export function Sidebar({
@@ -147,6 +148,7 @@ export function Sidebar({
   rateLimits,
   codexThreads,
   threadTokenUsage,
+  threadChangeSummaries,
   profile,
   canOpenProjects,
   onOpenSidebar,
@@ -658,7 +660,7 @@ export function Sidebar({
                                   : task.unread
                                     ? ", unread"
                                     : "";
-                                const changeSummary = taskChangeSummary(task);
+                                const changeSummary = taskChangeSummary(task, task.threadId ? threadChangeSummaries[task.threadId] : null);
                                 return (
                                   <div
                                     className={`task-list__row ${task.unread ? "is-unread" : ""} ${

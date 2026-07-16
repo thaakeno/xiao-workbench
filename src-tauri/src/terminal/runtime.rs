@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -10,6 +10,20 @@ use tauri::{AppHandle, Emitter};
 
 const MIN_COLS: u16 = 20;
 const MIN_ROWS: u16 = 4;
+
+#[cfg(windows)]
+fn shell_workspace_path(path: &Path) -> PathBuf {
+    let value = path.to_string_lossy();
+    value
+        .strip_prefix(r"\\?\")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+#[cfg(not(windows))]
+fn shell_workspace_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
 
 struct TerminalSession {
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -130,8 +144,11 @@ impl TerminalManager {
         let pair = native_pty_system()
             .openpty(pty_size(cols, rows))
             .map_err(|error| error.to_string())?;
+        // Windows canonicalization returns a `\\?\` device path. CMD treats
+        // that as a UNC path and silently falls back to the Windows directory.
+        let shell_workspace = shell_workspace_path(&workspace);
         let mut command = CommandBuilder::new(shell);
-        command.cwd(&workspace);
+        command.cwd(&shell_workspace);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         let mut child = pair
@@ -304,6 +321,15 @@ fn validate_session_id(session_id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn cmd_workspace_path_removes_windows_device_prefix() {
+        assert_eq!(
+            shell_workspace_path(Path::new(r"\\?\D:\Project Archive\xiao-workbench")),
+            PathBuf::from(r"D:\Project Archive\xiao-workbench"),
+        );
+    }
 
     #[test]
     fn terminal_sizes_have_safe_minimums() {

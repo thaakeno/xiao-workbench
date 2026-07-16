@@ -308,9 +308,18 @@ export const timelineEntryFromItem = (
             typeof (item.error as Record<string, unknown>).message === "string"
           ? String((item.error as Record<string, unknown>).message)
           : null;
+    const argumentText = item.arguments && typeof item.arguments === "object"
+      ? JSON.stringify(item.arguments)
+      : typeof item.arguments === "string" ? item.arguments : "";
+    const normalizedTool = tool.toLocaleLowerCase();
+    const kind = normalizedTool.includes("search")
+      ? "search"
+      : normalizedTool.includes("read") || normalizedTool.includes("get") || normalizedTool.includes("list")
+        ? "read"
+        : "command";
     return {
       id,
-      kind: "command",
+      kind: "explore",
       createdAt,
       title: `${server} · ${tool}`,
       body:
@@ -321,17 +330,25 @@ export const timelineEntryFromItem = (
             : JSON.stringify(item.result, null, 2).slice(0, 8_000),
       meta: "Plugin tool",
       status: failed ? "error" : item.status === "inProgress" ? "active" : "success",
+      exploration: [{
+        kind,
+        command: argumentText || `${server}.${tool}`,
+        label: `${server} · ${tool}`,
+        query: kind === "search" ? argumentText : undefined,
+      }],
     };
   }
 
   if (item.type === "webSearch") {
+    const query = typeof item.query === "string" ? item.query : "Web search";
     return {
       id,
-      kind: "result",
+      kind: "explore",
       createdAt,
-      title: typeof item.query === "string" ? `Searched: ${item.query}` : "Web search",
+      title: `Searched: ${query}`,
       meta: "Browser tool",
       status: "success",
+      exploration: [{ kind: "web", command: query, label: query, query }],
     };
   }
 

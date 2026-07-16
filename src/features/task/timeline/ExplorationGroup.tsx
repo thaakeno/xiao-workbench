@@ -8,37 +8,50 @@ type ExplorationGroupProps = {
 };
 
 const iconByAction: Record<AgentExplorationAction["kind"], XiaoIconName> = {
+  command: "command",
   list: "folderOpen",
   read: "file",
   search: "search",
+  web: "browser",
 };
 
 const countLabel = (count: number, singular: string) =>
   `${count} ${count === 1 ? singular : `${singular}s`}`;
 
 const actionLabel = (action: AgentExplorationAction) => {
+  if (action.kind === "command") return "Ran";
   if (action.kind === "read") return "Read";
   if (action.kind === "search") return "Searched";
+  if (action.kind === "web") return "Searched web";
   return "Listed";
 };
 
 export function ExplorationGroup({ entries, index, expandByDefault }: ExplorationGroupProps) {
-  const actions = entries.flatMap((entry) =>
-    (entry.exploration ?? []).map((action) => ({
+  const actions = entries.flatMap((entry) => {
+    const projected = entry.exploration?.length
+      ? entry.exploration
+      : entry.kind === "command"
+        ? [{ kind: "command" as const, command: entry.command ?? entry.title, label: entry.title }]
+        : [];
+    return projected.map((action) => ({
       action,
       entryId: entry.id,
       status: entry.status,
-    })),
-  );
+    }));
+  });
   const reads = actions.filter(({ action }) => action.kind === "read").length;
   const searches = actions.filter(({ action }) => action.kind === "search").length;
   const lists = actions.filter(({ action }) => action.kind === "list").length;
+  const commands = actions.filter(({ action }) => action.kind === "command").length;
+  const web = actions.filter(({ action }) => action.kind === "web").length;
   const active = entries.some((entry) => entry.status === "active");
   const failed = entries.some((entry) => entry.status === "error");
   const counts = [
     reads ? countLabel(reads, "read") : null,
     searches ? countLabel(searches, "search") : null,
     lists ? countLabel(lists, "list") : null,
+    commands ? countLabel(commands, "command") : null,
+    web ? countLabel(web, "web search") : null,
   ].filter((value): value is string => Boolean(value));
 
   return (
@@ -51,7 +64,7 @@ export function ExplorationGroup({ entries, index, expandByDefault }: Exploratio
           <span className="exploration-group__mark">
             <XiaoIcon name="search" size={13} />
           </span>
-          <strong>{active ? "Exploring" : "Explored"}</strong>
+          <strong>{active ? "Working" : "Worked"}</strong>
           <span>{counts.join(", ") || countLabel(entries.length, "action")}</span>
           {active ? <i className="activity__pulse" /> : null}
           <XiaoIcon className="exploration-group__caret" name="caret" size={12} />

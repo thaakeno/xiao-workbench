@@ -16,6 +16,7 @@ export type TaskRunDefaults = {
 
 export type AppPreferences = {
   importCodexHistory: boolean;
+  showChatExport: boolean;
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
   focusNewTasks: boolean;
@@ -39,6 +40,7 @@ export const defaultTaskRunDefaults: TaskRunDefaults = {
 
 const defaults: AppPreferences = {
   importCodexHistory: true,
+  showChatExport: true,
   showReasoningSummaries: true,
   expandToolOutput: false,
   focusNewTasks: true,
@@ -82,6 +84,8 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
       typeof stored.importCodexHistory === "boolean"
         ? stored.importCodexHistory
         : defaults.importCodexHistory,
+    showChatExport:
+      typeof stored.showChatExport === "boolean" ? stored.showChatExport : defaults.showChatExport,
     showReasoningSummaries:
       typeof stored.showReasoningSummaries === "boolean"
         ? stored.showReasoningSummaries

@@ -111,7 +111,7 @@ export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: Usag
     <div className="usage-dialog__backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="usage-dialog usage-dialog--dashboard" role="dialog" aria-modal="true" aria-labelledby="usage-dialog-title">
         <header className="usage-dialog__header">
-          <div className="usage-dialog__title"><i><XiaoIcon name="runtime" size={22} /></i><div><span>Local Codex analytics</span><h2 id="usage-dialog-title">Usage</h2><p>Live limits, recorded tokens, model mix, and API-equivalent cost.</p></div></div>
+          <div className="usage-dialog__title"><i><XiaoIcon name="runtime" size={22} /></i><div><span>Local Codex analytics</span><h2 id="usage-dialog-title">Usage</h2><p>Live limits, cumulative processed tokens, model mix, and a standard-rate estimate.</p></div></div>
           <button type="button" aria-label="Close usage details" onClick={onClose}><XiaoIcon name="close" size={16} /></button>
         </header>
         <div className="usage-dialog__body">
@@ -123,8 +123,8 @@ export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: Usag
           </nav>
 
           <section className="usage-dialog__overview">
-            <div className="usage-dialog__headline"><span>API-equivalent value</span><strong>{money.format(cost)}</strong><small>{pricedTokens === total ? "All recorded tokens priced" : `${Math.round(pricedTokens / Math.max(1, total) * 100)}% of tokens have known pricing`}</small></div>
-            <div className="usage-dialog__token-total"><span>Recorded tokens</span><strong>{compact.format(total)}</strong><small>{compact.format(input)} input <b>·</b> {compact.format(output)} output</small></div>
+            <div className="usage-dialog__headline"><span>Standard-rate estimate</span><strong>{money.format(cost)}</strong><small>{pricedTokens === total ? "100% mapped to a published standard rate" : `${Math.round(pricedTokens / Math.max(1, total) * 100)}% mapped to a published rate`}</small></div>
+            <div className="usage-dialog__token-total"><span>Cumulative tokens</span><strong>{compact.format(total)}</strong><small>{compact.format(input)} input <b>·</b> {compact.format(output)} output</small></div>
             <dl className="usage-dialog__quick-stats">
               <div><dt>Sessions</dt><dd>{number.format(rows.length)}</dd></div><div><dt>Active days</dt><dd>{number.format(activeDays)}</dd></div><div><dt>Cache share</dt><dd>{input ? Math.round(cached / input * 100) : 0}%</dd></div><div><dt>Average</dt><dd>{compact.format(rows.length ? total / rows.length : 0)}</dd></div>
             </dl>
@@ -142,7 +142,7 @@ export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: Usag
           <section className="usage-dialog__ranking"><header><div><span>Conversation ranking</span><h3>Most tokens used</h3></div><small>{rows.length} recorded sessions</small></header>{rows.length ? <div className="usage-dialog__rows">{rows.slice(0, 100).map((row, index) => <article key={row.threadId}><span className="usage-dialog__rank">{index + 1}</span><div className="usage-dialog__conversation"><strong title={row.title}>{row.title}</strong><small>{row.project} · {row.model ?? "model unavailable"}</small><i><b style={{ width: `${Math.max(1, row.totalTokens / largest * 100)}%` }} /></i></div><div className="usage-dialog__tokens"><strong>{compact.format(row.totalTokens)}</strong><small>{row.estimatedCost == null ? "Cost unavailable" : money.format(row.estimatedCost)}</small></div></article>)}</div> : <div className="usage-dialog__empty"><XiaoIcon name="runtime" size={22} /><strong>No token records in this period</strong><p>Some older Codex sessions did not persist token-count events.</p></div>}</section>
           <section className="usage-dialog__models"><header><span>By model</span><h3>Token and cost mix</h3></header><div>{modelRows.map(([model, value]) => <article key={model}><strong>{model}</strong><span>{compact.format(value.input)} in</span><span>{compact.format(value.output)} out</span><span>{compact.format(value.cached)} cached</span><b>{value.cost == null ? "—" : money.format(value.cost)}</b></article>)}</div></section>
         </div>
-        <footer><span>Cost uses current standard API-equivalent rates and exact recorded token classes; it is not your subscription bill.</span>{rateLimits?.updatedAt ? <span>Quota updated {new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(rateLimits.updatedAt)}</span> : null}</footer>
+        <footer><span>Tokens are exact cumulative rollout counters. Cost applies current standard rates, without unverifiable long-context tiers or historical price changes; it is not your subscription bill.</span>{rateLimits?.updatedAt ? <span>Quota updated {new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(rateLimits.updatedAt)}</span> : null}</footer>
       </section>
     </div>,
     document.body,
