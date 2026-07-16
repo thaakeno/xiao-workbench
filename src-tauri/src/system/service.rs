@@ -141,15 +141,60 @@ fn npm_manages_active_codex() -> bool {
 
 fn resolve_codex_path() -> Option<PathBuf> {
     #[cfg(windows)]
-    let output = command_output("where.exe", &["codex"])?;
+    {
+        command_output("where.exe", &["codex"])
+            .and_then(|output| first_windows_command_path(&output))
+            .or_else(codex_desktop_path)
+    }
     #[cfg(not(windows))]
-    let output = command_output("which", &["codex"])?;
+    {
+        command_output("which", &["codex"]).and_then(|output| first_command_path(&output))
+    }
+}
 
+#[cfg(windows)]
+fn first_windows_command_path(output: &str) -> Option<PathBuf> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .find(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    matches!(
+                        extension.to_ascii_lowercase().as_str(),
+                        "bat" | "cmd" | "com" | "exe"
+                    )
+                })
+        })
+}
+
+#[cfg(not(windows))]
+fn first_command_path(output: &str) -> Option<PathBuf> {
     output
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(PathBuf::from)
+}
+
+#[cfg(windows)]
+fn codex_desktop_path() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .and_then(|directory| codex_desktop_path_in(&directory))
+}
+
+#[cfg(windows)]
+fn codex_desktop_path_in(local_app_data: &Path) -> Option<PathBuf> {
+    let executable = local_app_data
+        .join("OpenAI")
+        .join("Codex")
+        .join("bin")
+        .join("codex.exe");
+    executable.is_file().then_some(executable)
 }
 
 pub(crate) fn codex_command() -> Option<Command> {
@@ -446,6 +491,38 @@ mod tests {
             String::from_utf8_lossy(&output.stdout).trim(),
             "codex-cli 9.8.7"
         );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn skips_extensionless_npm_shims_on_windows() {
+        let output = "C:\\Users\\xiao\\AppData\\Roaming\\npm\\codex\r\nC:\\Users\\xiao\\AppData\\Roaming\\npm\\codex.cmd\r\n";
+
+        assert_eq!(
+            first_windows_command_path(output),
+            Some(PathBuf::from(
+                r"C:\Users\xiao\AppData\Roaming\npm\codex.cmd"
+            ))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn finds_the_codex_desktop_bundled_cli() {
+        let directory = std::env::temp_dir().join(format!(
+            "xiao-codex-desktop-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let executable = directory.join("OpenAI/Codex/bin/codex.exe");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+
+        assert_eq!(codex_desktop_path_in(&directory), Some(executable));
         let _ = std::fs::remove_dir_all(directory);
     }
 }
