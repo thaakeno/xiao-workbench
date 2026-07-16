@@ -61,6 +61,7 @@ pub fn list_projects(app: &AppHandle) -> Result<Vec<XiaoProjectSummary>, String>
                 .map(|task| task.updated_at)
                 .max()
                 .unwrap_or_default(),
+            task_count: workspace.tasks.len(),
             path: workspace.workspace_path,
         })
         .collect::<Vec<_>>();

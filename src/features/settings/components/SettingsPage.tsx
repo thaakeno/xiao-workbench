@@ -17,6 +17,8 @@ export type ArchivedTaskItem = {
   updatedAt: number;
   projectPath: string;
   projectName: string;
+  origin?: "xiao" | "codex";
+  threadId?: string | null;
 };
 
 type SettingsSection = "agent" | "archived" | "general" | "models" | "runtime" | "shortcuts";
@@ -223,6 +225,7 @@ export function SettingsPage({
               <div className="settings-block">
                 <h3>Timeline</h3>
                 <div className="settings-list">
+                  <SettingRow title="Codex history" description="Show persisted Codex conversations for projects you have already added to Xiao."><Toggle label="Import Codex history" checked={preferences.importCodexHistory} onChange={(importCodexHistory) => onPreferencesChange({ importCodexHistory })} /></SettingRow>
                   <SettingRow title="Reasoning summaries" description="Show the reasoning summaries Codex explicitly publishes. Hidden reasoning is never inferred."><Toggle label="Reasoning summaries" checked={preferences.showReasoningSummaries} onChange={(showReasoningSummaries) => onPreferencesChange({ showReasoningSummaries })} /></SettingRow>
                   <SettingRow title="Expand tool output" description="Open command output and patch details by default. Active tools always stay visible."><Toggle label="Expand tool output" checked={preferences.expandToolOutput} onChange={(expandToolOutput) => onPreferencesChange({ expandToolOutput })} /></SettingRow>
                 </div>

@@ -64,6 +64,7 @@ pub struct XiaoProjectSummary {
     pub path: String,
     pub name: String,
     pub updated_at: i64,
+    pub task_count: usize,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]

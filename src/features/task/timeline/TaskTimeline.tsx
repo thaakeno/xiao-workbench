@@ -17,6 +17,12 @@ type TaskTimelineProps = {
   ) => Promise<void>;
   taskId: string;
   onReviewChanges: () => void;
+  canUndo: boolean;
+  undoing: boolean;
+  onUndo: () => void;
+  historyHasMore: boolean;
+  historyLoadingOlder: boolean;
+  onLoadOlderHistory: () => void;
 };
 
 type TimelineRow =
@@ -72,10 +78,28 @@ export function TaskTimeline({
   taskId,
   onResolveApproval,
   onReviewChanges,
+  canUndo,
+  undoing,
+  onUndo,
+  historyHasMore,
+  historyLoadingOlder,
+  onLoadOlderHistory,
 }: TaskTimelineProps) {
   const rows = timelineRows(timeline);
+  const latestChangeId = [...timeline].reverse().find((entry) => entry.kind === "change")?.id;
   return (
     <div className="timeline" aria-live="polite">
+      {historyHasMore ? (
+        <button
+          className="timeline__load-older"
+          type="button"
+          disabled={historyLoadingOlder}
+          onClick={onLoadOlderHistory}
+        >
+          <XiaoIcon className={historyLoadingOlder ? "spin" : undefined} name={historyLoadingOlder ? "pending" : "archive"} size={14} />
+          {historyLoadingOlder ? "Loading older messages" : "Load older messages"}
+        </button>
+      ) : null}
       {!timeline.length ? (
         <div className="timeline__empty">
           <span className="timeline__empty-mark"><XiaoIcon name="command" size={22} /></span>
@@ -101,6 +125,9 @@ export function TaskTimeline({
             taskId={taskId}
             onResolveApproval={onResolveApproval}
             onReviewChanges={onReviewChanges}
+            canUndo={canUndo && row.entry.id === latestChangeId}
+            undoing={undoing && row.entry.id === latestChangeId}
+            onUndo={onUndo}
           />
         ),
       )}

@@ -31,4 +31,8 @@ export type WorkbenchTask = {
   goal: AgentGoal | null;
   timeline: TimelineEntry[];
   plan: AgentPlan | null;
+  origin?: "xiao" | "codex";
+  historyLoaded?: boolean;
+  historyCursor?: string | null;
+  historyLoadingOlder?: boolean;
 };

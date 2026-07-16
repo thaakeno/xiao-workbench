@@ -5,6 +5,7 @@ import type {
   AgentAccountUsage,
   AgentModelSummary,
   AgentSessionStart,
+  AgentThreadTokenUsage,
   XiaoHistoryItem,
 } from "../models/agent";
 import type {
@@ -61,6 +62,10 @@ export const nativeBridge = {
 
   readAgentUsage() {
     return invoke<AgentAccountUsage>("read_agent_usage");
+  },
+
+  readAgentThreadUsage() {
+    return invoke<AgentThreadTokenUsage[]>("read_agent_thread_usage");
   },
 
   listAgentModels() {

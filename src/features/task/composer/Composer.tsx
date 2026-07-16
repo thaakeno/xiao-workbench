@@ -40,6 +40,7 @@ type ComposerProps = {
   sandboxMode: AgentSandboxMode;
   goal: AgentGoal | null;
   plan: AgentPlan | null;
+  changeSummary: { files: number; additions: number; deletions: number };
   reviewContext: AgentAttachment[];
   questionRequest: AgentQuestionRequest | null;
   draftText: string;
@@ -116,6 +117,7 @@ export function Composer({
   sandboxMode,
   goal,
   plan,
+  changeSummary,
   reviewContext,
   questionRequest,
   draftText,
@@ -161,7 +163,7 @@ export function Composer({
   const [goalEditorOpen, setGoalEditorOpen] = useState(false);
   const [goalValue, setGoalValue] = useState(goal?.objective ?? "");
   const [dragging, setDragging] = useState(false);
-  const [planCollapsed, setPlanCollapsed] = useState(false);
+  const [planCollapsed, setPlanCollapsed] = useState(true);
   const [fileMention, setFileMention] = useState<FileMention | null>(null);
   const [fileResults, setFileResults] = useState<FuzzyFileResult[]>([]);
   const [fileSearchLoading, setFileSearchLoading] = useState(false);
@@ -199,6 +201,7 @@ export function Composer({
     planSteps.find((step) => step.status === "inProgress") ??
     planSteps.find((step) => step.status === "pending") ??
     planSteps.at(-1);
+  const activePlanStepNumber = Math.max(1, planSteps.indexOf(activePlanStep ?? planSteps[0]) + 1);
   const normalizedSlashQuery = slashQuery?.trim().toLocaleLowerCase() ?? "";
   const filteredSlashCommands = filterSlashCommands(SLASH_COMMANDS, normalizedSlashQuery)
     .filter((command) => command.id !== "undo" || (canUndo && !undoing));
@@ -584,12 +587,14 @@ export function Composer({
             <span className="plan-dock__identity">
               <span className="plan-dock__mark"><XiaoIcon name="plan" size={14} /></span>
               <span>
-                <small>Execution plan</small>
-                <strong>{completedPlanSteps} / {planSteps.length} complete</strong>
+                <small>Step {activePlanStepNumber} / {planSteps.length}</small>
+                <strong>{planComplete ? "Complete" : activePlanStep?.step}</strong>
               </span>
             </span>
             <span className="plan-dock__current">
-              {planComplete ? "All steps completed" : activePlanStep?.step}
+              {changeSummary.files} {changeSummary.files === 1 ? "file" : "files"} changed
+              <b className="plan-dock__additions">+{changeSummary.additions}</b>
+              <b className="plan-dock__deletions">-{changeSummary.deletions}</b>
             </span>
             <span
               className="plan-dock__progress"

@@ -8,12 +8,19 @@ import {
 import { createPortal } from "react-dom";
 
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
-import type { AgentAccountSummary, AgentRuntimeState } from "../../../core/models/agent";
+import type {
+  AgentAccountSummary,
+  AgentRateLimits,
+  AgentRuntimeState,
+  AgentThreadTokenUsage,
+  CodexThreadSummary,
+} from "../../../core/models/agent";
 import type { WorkspaceSnapshot } from "../../../core/models/workspace";
 import type { XiaoProjectSummary } from "../../../core/models/xiao";
 import { profileInitials, type LocalUserProfile } from "../../profile/hooks/useLocalProfile";
-import type { TaskGroup, WorkbenchTask } from "../../task/task.types";
+import type { WorkbenchTask } from "../../task/task.types";
 import type { AppPage } from "../shell.types";
+import { UsageDetailsDialog } from "./UsageDetailsDialog";
 
 type SidebarProps = {
   activePage: AppPage;
@@ -24,6 +31,9 @@ type SidebarProps = {
   workspace: WorkspaceSnapshot;
   runtime: AgentRuntimeState;
   account: AgentAccountSummary | null;
+  rateLimits: AgentRateLimits | null;
+  codexThreads: CodexThreadSummary[];
+  threadTokenUsage: AgentThreadTokenUsage[];
   profile: LocalUserProfile;
   canOpenProjects: boolean;
   onOpenSidebar: () => void;
@@ -35,6 +45,7 @@ type SidebarProps = {
   onSelectProject: (path: string) => void;
   onCreateTask: (title: string) => void;
   onSelectTask: (taskId: string) => void;
+  onSelectCodexThread: (thread: CodexThreadSummary) => void;
   onToggleTaskPinned: (taskId: string) => void;
   onSetTaskArchived: (taskId: string, archived: boolean) => void;
   onRenameTask: (taskId: string, title: string) => void;
@@ -74,11 +85,13 @@ type RenamingTask = {
 const projectMenuWidth = 218;
 const projectMenuHeight = 250;
 const taskMenuHeight = 330;
-const taskGroupOrder: TaskGroup[] = ["Active", "Recent", "Yesterday", "This week"];
 const sidebarDateFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",
 });
+const sameProjectPath = (left: string, right: string) =>
+  left.replace(/[\\/]+$/, "").toLocaleLowerCase() ===
+  right.replace(/[\\/]+$/, "").toLocaleLowerCase();
 
 const relativeTime = (timestamp: number, now: number) => {
   const elapsed = Math.max(0, now - timestamp);
@@ -89,12 +102,37 @@ const relativeTime = (timestamp: number, now: number) => {
   return sidebarDateFormatter.format(new Date(timestamp));
 };
 
-const groupForTask = (task: WorkbenchTask, activeTaskId: string, now: number): TaskGroup => {
+const monthGroupFormatter = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+const startOfDay = (timestamp: number) => {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+};
+const groupForTask = (task: WorkbenchTask, activeTaskId: string, now: number) => {
   if (task.id === activeTaskId) return "Active";
-  const elapsed = Math.max(0, now - task.updatedAt);
-  if (elapsed < 86_400_000) return "Recent";
-  if (elapsed < 172_800_000) return "Yesterday";
-  return "This week";
+  const today = startOfDay(now);
+  const taskDay = startOfDay(task.updatedAt);
+  if (taskDay === today) return "Today";
+  if (taskDay === today - 86_400_000) return "Yesterday";
+  const todayDate = new Date(today);
+  const mondayOffset = (todayDate.getDay() + 6) % 7;
+  const startOfWeek = today - mondayOffset * 86_400_000;
+  if (taskDay >= startOfWeek) return "This week";
+  const taskDate = new Date(task.updatedAt);
+  if (taskDate.getFullYear() === todayDate.getFullYear() && taskDate.getMonth() === todayDate.getMonth()) return "Earlier this month";
+  return monthGroupFormatter.format(taskDate);
+};
+
+const taskChangeSummary = (task: WorkbenchTask) => {
+  for (let index = task.timeline.length - 1; index >= 0; index -= 1) {
+    const files = task.timeline[index]?.files;
+    if (!files?.length) continue;
+    return {
+      additions: files.reduce((sum, file) => sum + file.additions, 0),
+      deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    };
+  }
+  return null;
 };
 
 export function Sidebar({
@@ -106,6 +144,9 @@ export function Sidebar({
   workspace,
   runtime,
   account,
+  rateLimits,
+  codexThreads,
+  threadTokenUsage,
   profile,
   canOpenProjects,
   onOpenSidebar,
@@ -117,6 +158,7 @@ export function Sidebar({
   onSelectProject,
   onCreateTask,
   onSelectTask,
+  onSelectCodexThread,
   onToggleTaskPinned,
   onSetTaskArchived,
   onRenameTask,
@@ -136,6 +178,7 @@ export function Sidebar({
   const [taskMenu, setTaskMenu] = useState<TaskMenuState | null>(null);
   const [renamingTask, setRenamingTask] = useState<RenamingTask | null>(null);
   const [now, setNow] = useState(Date.now);
+  const [usageDetailsOpen, setUsageDetailsOpen] = useState(false);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const projectMenuTriggerRef = useRef<HTMLElement | null>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
@@ -143,16 +186,33 @@ export function Sidebar({
   const visibleTasks = [...tasks]
     .filter((task) => !task.archived)
     .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt);
-  const groupedTasks = taskGroupOrder
-    .map((group) => ({
-      group,
-      tasks: visibleTasks.filter((task) => groupForTask(task, activeTaskId, now) === group),
-    }))
-    .filter(({ tasks: groupTasks }) => groupTasks.length > 0);
+  const groupedTaskMap = new Map<string, WorkbenchTask[]>();
+  for (const task of visibleTasks) {
+    const group = groupForTask(task, activeTaskId, now);
+    groupedTaskMap.set(group, [...(groupedTaskMap.get(group) ?? []), task]);
+  }
+  const groupPriority = ["Active", "Today", "Yesterday", "This week", "Earlier this month"];
+  const groupedTasks = [...groupedTaskMap]
+    .map(([group, groupTasks]) => ({ group, tasks: groupTasks }))
+    .sort((left, right) => {
+      const leftIndex = groupPriority.indexOf(left.group);
+      const rightIndex = groupPriority.indexOf(right.group);
+      if (leftIndex < 0 && rightIndex < 0) return right.tasks[0].updatedAt - left.tasks[0].updatedAt;
+      if (leftIndex < 0) return 1;
+      if (rightIndex < 0) return -1;
+      return leftIndex - rightIndex;
+    });
   const menuProject = projects.find((project) => project.path === projectMenu?.projectPath);
   const menuTask = tasks.find((task) => task.id === taskMenu?.taskId);
   const projectSwitchLocked = runtime.phase === "working";
   const initials = profileInitials(profile.name);
+  const quotaWindows = [
+    rateLimits?.primary ? { label: "Session", window: rateLimits.primary } : null,
+    rateLimits?.secondary ? { label: "Weekly", window: rateLimits.secondary } : null,
+  ].filter((item): item is NonNullable<typeof item> => item != null);
+  const otherCodexThreads = codexThreads.filter(
+    (thread) => !thread.archived && !projects.some((project) => sameProjectPath(project.path, thread.cwd)),
+  );
 
   const closeProjectMenu = (restoreFocus = false) => {
     const trigger = projectMenuTriggerRef.current;
@@ -598,6 +658,7 @@ export function Sidebar({
                                   : task.unread
                                     ? ", unread"
                                     : "";
+                                const changeSummary = taskChangeSummary(task);
                                 return (
                                   <div
                                     className={`task-list__row ${task.unread ? "is-unread" : ""} ${
@@ -651,7 +712,7 @@ export function Sidebar({
                                           </span>
                                           <span className="task-list__copy">
                                             <span className="task-list__title">{task.title}</span>
-                                            <small>{taskMeta}</small>
+                                            <small><span>{taskMeta}</span>{changeSummary ? <i className="task-list__change-pill"><b>+{changeSummary.additions}</b><em>-{changeSummary.deletions}</em></i> : null}</small>
                                           </span>
                                           {task.pinned ? (
                                             <XiaoIcon className="task-list__pin" name="pin" size={12} />
@@ -687,7 +748,59 @@ export function Sidebar({
               </section>
             );
           })}
+          {otherCodexThreads.length ? (
+            <section className="sidebar-other-chats" aria-label="Other Codex chats">
+              <div className="sidebar-other-chats__heading">
+                <XiaoIcon name="branch" size={15} />
+                <span>Other Codex chats</span>
+                <small>{otherCodexThreads.length}</small>
+              </div>
+              <div className="sidebar-other-chats__list">
+                {otherCodexThreads.map((thread) => {
+                  const selected = activePage === "tasks" && activeTaskId === `codex:${thread.id}`;
+                  return (
+                    <button
+                      className={selected ? "is-selected" : ""}
+                      key={thread.id}
+                      type="button"
+                      title={`${thread.title}\n${thread.cwd}`}
+                      disabled={projectSwitchLocked && !selected}
+                      onClick={() => onSelectCodexThread(thread)}
+                    >
+                      <span>{thread.title}</span>
+                      <small>{thread.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? "Outside projects"} · {relativeTime(thread.updatedAt, now)}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
         </div>
+
+        {quotaWindows.length ? (
+          <section className="sidebar-usage" aria-label="Codex usage remaining">
+            <button className="sidebar-usage__open" type="button" onClick={() => setUsageDetailsOpen(true)}>
+              <span><XiaoIcon name="runtime" size={13} />Usage remaining</span>
+              <XiaoIcon name="caret" size={12} />
+            </button>
+            {quotaWindows.map(({ label, window }) => {
+              const remaining = Math.max(0, Math.min(100, Number((100 - window.usedPercent).toFixed(1))));
+              const urgency = remaining < 10 ? "is-critical" : remaining < 30 ? "is-warning" : "";
+              const reset = window.resetsAt
+                ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
+                    .format(new Date(window.resetsAt * 1_000))
+                : null;
+              return (
+                <div className={`sidebar-usage__row ${urgency}`} key={label}>
+                  <strong>{label}</strong>
+                  <span>{remaining}%</span>
+                  {reset ? <small>{reset}</small> : null}
+                  <i><b style={{ width: `${remaining}%` }} /></i>
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
 
         <nav className="sidebar__secondary-nav" aria-label="Utilities">
           <button
@@ -897,6 +1010,15 @@ export function Sidebar({
             document.body,
           )
         : null}
+
+      {usageDetailsOpen ? (
+        <UsageDetailsDialog
+          rateLimits={rateLimits}
+          threads={codexThreads}
+          usage={threadTokenUsage}
+          onClose={() => setUsageDetailsOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

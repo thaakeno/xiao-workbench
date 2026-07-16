@@ -14,6 +14,9 @@ const renderCompaction = (entry: TimelineEntry) => renderToStaticMarkup(
     taskId="task-1"
     onResolveApproval={async () => undefined}
     onReviewChanges={() => undefined}
+    canUndo={false}
+    undoing={false}
+    onUndo={() => undefined}
   />,
 );
 

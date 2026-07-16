@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
@@ -75,12 +75,6 @@ impl AgentRuntime {
         let mut command = codex_command().ok_or_else(|| {
             "Codex CLI was not found. Install it before connecting the agent runtime.".to_owned()
         })?;
-        let runtime_state_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("codex-runtime");
-        std::fs::create_dir_all(&runtime_state_dir).map_err(|error| error.to_string())?;
         command
             .args([
                 "app-server",
@@ -88,7 +82,6 @@ impl AgentRuntime {
                 "--enable",
                 "default_mode_request_user_input",
             ])
-            .env("CODEX_SQLITE_HOME", runtime_state_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

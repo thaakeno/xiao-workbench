@@ -50,6 +50,13 @@ pub async fn read_agent_usage(
 }
 
 #[tauri::command]
+pub async fn read_agent_thread_usage() -> Result<Vec<models::AgentThreadTokenUsage>, String> {
+    tauri::async_runtime::spawn_blocking(service::read_thread_token_usage)
+        .await
+        .map_err(|error| format!("Could not join the Codex usage scan: {error}"))?
+}
+
+#[tauri::command]
 pub async fn list_agent_models(
     runtime: State<'_, AgentRuntime>,
 ) -> Result<Vec<models::AgentModelSummary>, String> {

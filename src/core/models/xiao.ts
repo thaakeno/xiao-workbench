@@ -27,12 +27,17 @@ export type XiaoTaskDocument = {
   goal?: AgentGoal | null;
   timeline: TimelineEntry[];
   plan?: AgentPlan | null;
+  origin?: "xiao" | "codex";
+  historyLoaded?: boolean;
+  historyCursor?: string | null;
+  historyLoadingOlder?: boolean;
 };
 
 export type XiaoProjectSummary = {
   path: string;
   name: string;
   updatedAt: number;
+  taskCount?: number;
   pinned?: boolean;
 };
 

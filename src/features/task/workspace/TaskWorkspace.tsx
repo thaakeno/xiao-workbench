@@ -54,6 +54,8 @@ type TaskWorkspaceProps = {
   contextUsage: ThreadTokenUsage | null;
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
+  historyHasMore: boolean;
+  historyLoadingOlder: boolean;
   workspace: WorkspaceSnapshot;
   onSubmit: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
   onQueueFollowUp: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
@@ -86,6 +88,7 @@ type TaskWorkspaceProps = {
   ) => Promise<void>;
   onFocusView: (view: FocusView) => void;
   onToggleArchived: () => void;
+  onLoadOlderHistory: () => void;
 };
 
 export function TaskWorkspace({
@@ -119,6 +122,8 @@ export function TaskWorkspace({
   contextUsage,
   showReasoningSummaries,
   expandToolOutput,
+  historyHasMore,
+  historyLoadingOlder,
   workspace,
   onSubmit,
   onQueueFollowUp,
@@ -143,6 +148,7 @@ export function TaskWorkspace({
   onResolveApproval,
   onFocusView,
   onToggleArchived,
+  onLoadOlderHistory,
 }: TaskWorkspaceProps) {
   const scrollArea = useRef<HTMLDivElement>(null);
   const followLiveOutput = useRef(true);
@@ -177,6 +183,11 @@ export function TaskWorkspace({
       sandboxMode={sandboxMode}
       goal={goal}
       plan={plan}
+      changeSummary={{
+        files: workspace.git?.changes.length ?? 0,
+        additions: workspace.git?.changes.reduce((sum, change) => sum + change.additions, 0) ?? 0,
+        deletions: workspace.git?.changes.reduce((sum, change) => sum + change.deletions, 0) ?? 0,
+      }}
       reviewContext={reviewContext}
       questionRequest={questionRequest}
       draftText={draftText}
@@ -270,15 +281,21 @@ export function TaskWorkspace({
           followLiveOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
         }}
       >
-        <TaskTimeline
+      <TaskTimeline
           taskId={taskId}
           timeline={timeline}
           runtime={runtime}
           showReasoningSummaries={showReasoningSummaries}
           expandToolOutput={expandToolOutput}
           onResolveApproval={onResolveApproval}
-          onReviewChanges={() => onFocusView("changes")}
-        />
+        onReviewChanges={() => onFocusView("changes")}
+        canUndo={canUndo}
+        undoing={undoing}
+        onUndo={onUndo}
+        historyHasMore={historyHasMore}
+        historyLoadingOlder={historyLoadingOlder}
+        onLoadOlderHistory={onLoadOlderHistory}
+      />
       </div>
       {composer}
     </section>

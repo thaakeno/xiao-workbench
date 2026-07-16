@@ -7,8 +7,8 @@ mod workspace;
 mod xiao;
 
 use agent::commands::{
-    agent_reply, agent_request, list_agent_models, read_agent_account, read_agent_usage,
-    start_agent_runtime, start_xiao_session, stop_agent_runtime,
+    agent_reply, agent_request, list_agent_models, read_agent_account, read_agent_thread_usage,
+    read_agent_usage, start_agent_runtime, start_xiao_session, stop_agent_runtime,
 };
 use agent::runtime::AgentRuntime;
 use browser::commands::{
@@ -59,6 +59,7 @@ pub fn run() {
             agent_reply,
             read_agent_account,
             read_agent_usage,
+            read_agent_thread_usage,
             list_agent_models,
             start_xiao_session,
             mutate_git,

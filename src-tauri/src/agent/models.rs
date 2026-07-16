@@ -28,6 +28,21 @@ pub struct AgentDailyUsageBucket {
     pub tokens: u64,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentThreadTokenUsage {
+    pub thread_id: String,
+    pub model: Option<String>,
+    pub originator: Option<String>,
+    pub total_tokens: u64,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub updated_at: u64,
+    pub daily_usage_buckets: Vec<AgentDailyUsageBucket>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentModelSummary {

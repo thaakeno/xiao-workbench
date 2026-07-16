@@ -8,7 +8,8 @@
 
 .task-workspace--launch {
   display: block;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .task-launch {
@@ -262,12 +263,15 @@
 
 .task-workspace__scroll {
   min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
 }
 
 .timeline {
   width: min(100%, 760px);
+  min-width: 0;
   min-height: 100%;
   margin: 0 auto;
   padding: 34px 34px 44px;
@@ -661,29 +665,74 @@
 
 .activity--patch {
   margin: 18px 0 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-raised);
 }
 
 .patch-activity__heading {
-  display: flex;
-  min-height: 28px;
-  align-items: baseline;
-  gap: 7px;
+  display: grid;
+  min-height: 70px;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
   color: var(--muted);
   font-size: var(--text-label);
 }
 
-.patch-activity__heading > strong {
+.patch-activity__mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-deep);
+  color: var(--text-soft);
+}
+
+.patch-activity__summary {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.patch-activity__summary > strong {
   color: var(--text);
   font-size: 14px;
   font-weight: 610;
 }
 
-.patch-activity__heading > small {
+.patch-activity__summary > small {
   display: flex;
   gap: 6px;
-  margin-left: 2px;
   font-family: var(--font-mono);
   font-size: var(--text-micro);
+}
+
+.patch-activity__actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.patch-activity__actions button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-deep);
+  color: var(--text-soft);
+  font-size: var(--text-label);
+}
+
+.patch-activity__actions button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .patch-activity__heading b,
@@ -701,9 +750,10 @@
 .patch-activity__files {
   display: grid;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: var(--surface-raised);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 
 .patch-activity__files details + details {
@@ -859,23 +909,6 @@
   padding: 14px;
   color: var(--muted);
   font-size: var(--text-label);
-}
-
-.patch-activity__review {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  gap: 5px;
-  margin-top: 6px;
-  padding: 0 7px;
-  border-radius: 7px;
-  color: var(--muted);
-  font-size: var(--text-caption);
-}
-
-.patch-activity__review:hover {
-  background: var(--surface-hover);
-  color: var(--text-soft);
 }
 
 .activity__tool-details .command-block pre,
@@ -1877,6 +1910,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.plan-dock__current b {
+  margin-left: 7px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-dock__additions { color: var(--success); }
+.plan-dock__deletions { color: var(--danger); }
 
 .plan-dock__progress {
   display: block;

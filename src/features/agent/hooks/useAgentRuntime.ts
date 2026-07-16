@@ -13,6 +13,7 @@ import type {
   AgentModelSummary,
   AgentPlan,
   AgentQuestionRequest,
+  AgentRateLimits,
   AgentRuntimeState,
   AgentSandboxMode,
   AgentTurnOutcome,
@@ -34,6 +35,9 @@ import {
 } from "./agentProtocol";
 
 const MAX_RUNTIME_LOGS = 240;
+const RATE_LIMIT_SNAPSHOT_KEY = "xiao.rate-limit-snapshot.v1";
+const MAX_PERSISTED_TOOL_OUTPUT = 32_000;
+const MAX_PERSISTED_PATCH = 40_000;
 const PLAN_PROGRESS_INSTRUCTIONS =
   "When you publish a task plan with update_plan, keep it current throughout execution. " +
   "As soon as a step finishes, mark it completed and set the next step to in_progress before continuing. " +
@@ -163,6 +167,11 @@ const countDiffLines = (diff: string) => {
   return { additions, deletions };
 };
 
+const boundedPersistedText = (value: unknown, limit: number) => {
+  if (typeof value !== "string") return undefined;
+  return value.length <= limit ? value : `${value.slice(0, limit)}\n\n[Output truncated by Xiao]`;
+};
+
 const readTokenUsage = (value: unknown): TokenUsageBreakdown | null => {
   if (!value || typeof value !== "object") return null;
   const usage = value as Record<string, unknown>;
@@ -179,13 +188,14 @@ const readTokenUsage = (value: unknown): TokenUsageBreakdown | null => {
   return Object.fromEntries(fields.map((field) => [field, usage[field]])) as TokenUsageBreakdown;
 };
 
-const timelineEntryFromItem = (item: Record<string, unknown>): TimelineEntry | null => {
+export const timelineEntryFromItem = (
+  item: Record<string, unknown>,
+  createdAt = Date.now(),
+): TimelineEntry | null => {
   const contextCompaction = contextCompactionTimelineEntry(item, "completed");
   if (contextCompaction) return contextCompaction;
 
   const id = typeof item.id === "string" ? item.id : crypto.randomUUID();
-  const createdAt = Date.now();
-
   if (item.type === "agentMessage" && typeof item.text === "string") {
     return {
       id,
@@ -239,7 +249,7 @@ const timelineEntryFromItem = (item: Record<string, unknown>): TimelineEntry | n
         createdAt,
         title: commandStatus === "inProgress" ? "Exploring workspace" : failed ? "Exploration failed" : "Explored workspace",
         command: typeof item.command === "string" ? item.command : undefined,
-        body: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : undefined,
+        body: boundedPersistedText(item.aggregatedOutput, MAX_PERSISTED_TOOL_OUTPUT),
         meta: typeof item.cwd === "string" ? item.cwd : "Workspace",
         status: commandStatus === "inProgress" ? "active" : failed ? "error" : "success",
         exploration,
@@ -256,7 +266,7 @@ const timelineEntryFromItem = (item: Record<string, unknown>): TimelineEntry | n
             ? "Command did not complete"
             : "Command completed",
       command: typeof item.command === "string" ? item.command : "Running command",
-      body: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : undefined,
+      body: boundedPersistedText(item.aggregatedOutput, MAX_PERSISTED_TOOL_OUTPUT),
       meta: typeof item.cwd === "string" ? item.cwd : "Workspace",
       status: commandStatus === "inProgress" ? "active" : failed ? "error" : "success",
     };
@@ -267,7 +277,7 @@ const timelineEntryFromItem = (item: Record<string, unknown>): TimelineEntry | n
       if (!change || typeof change !== "object") return [];
       const value = change as Record<string, unknown>;
       if (typeof value.path !== "string") return [];
-      const patch = typeof value.diff === "string" ? value.diff : undefined;
+      const patch = boundedPersistedText(value.diff, MAX_PERSISTED_PATCH);
       const stats = countDiffLines(patch ?? "");
       return [{ path: value.path, ...stats, patch }];
     });
@@ -416,6 +426,7 @@ export function useAgentRuntime(
   workspacePath: string,
   activeTaskId: string,
   activeTaskTitle: string,
+  activeTaskThreadId: string | null,
   activeTaskTimeline: TimelineEntry[],
   activeTaskModel: string | null,
   activeTaskReasoningEffort: string | null,
@@ -435,6 +446,10 @@ export function useAgentRuntime(
   const [runtime, setRuntime] = useState<AgentRuntimeState>(initialRuntime);
   const [account, setAccount] = useState<AgentAccountSummary | null>(null);
   const [accountUsage, setAccountUsage] = useState<AgentAccountUsage | null>(null);
+  const [rateLimits, setRateLimits] = useState<AgentRateLimits | null>(() => {
+    try { return JSON.parse(window.localStorage.getItem(RATE_LIMIT_SNAPSHOT_KEY) ?? "null"); }
+    catch { return null; }
+  });
   const [models, setModels] = useState<AgentModelSummary[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogEntry[]>([]);
   const [threadUsage, setThreadUsage] = useState<Record<string, ThreadTokenUsage>>({});
@@ -620,12 +635,60 @@ export function useAgentRuntime(
   );
 
   const refreshAccountUsage = useCallback(async () => {
-    try {
-      setAccountUsage(await nativeBridge.readAgentUsage());
-    } catch {
-      setAccountUsage(null);
+    const [usageResult, limitsResult] = await Promise.allSettled([
+      nativeBridge.readAgentUsage(),
+      nativeBridge.agentRequest<Record<string, unknown>>("account/rateLimits/read", null),
+    ]);
+    setAccountUsage(usageResult.status === "fulfilled" ? usageResult.value : null);
+    if (limitsResult.status !== "fulfilled") {
+      return;
     }
+    const snapshot = limitsResult.value.rateLimits;
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+    const value = snapshot as Record<string, unknown>;
+    const readWindow = (raw: unknown): AgentRateLimits["primary"] => {
+      if (!raw || typeof raw !== "object") return null;
+      const window = raw as Record<string, unknown>;
+      if (typeof window.usedPercent !== "number") return null;
+      return {
+        usedPercent: window.usedPercent,
+        windowDurationMins:
+          typeof window.windowDurationMins === "number" ? window.windowDurationMins : null,
+        resetsAt: typeof window.resetsAt === "number" ? window.resetsAt : null,
+      };
+    };
+    const credits = value.credits;
+    const balance = credits && typeof credits === "object"
+      ? (credits as Record<string, unknown>).balance
+      : null;
+    const parsedBalance = typeof balance === "string" ? Number(balance) : null;
+    const nextLimits: AgentRateLimits = {
+      primary: readWindow(value.primary),
+      secondary: readWindow(value.secondary),
+      creditsRemaining: parsedBalance != null && Number.isFinite(parsedBalance) ? parsedBalance : null,
+      updatedAt: Date.now(),
+    };
+    setRateLimits(nextLimits);
+    try { window.localStorage.setItem(RATE_LIMIT_SNAPSHOT_KEY, JSON.stringify(nextLimits)); }
+    catch { /* Live state remains available. */ }
   }, []);
+
+  useEffect(() => {
+    if (!isTauriHost() || (runtime.phase !== "ready" && runtime.phase !== "working")) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshAccountUsage();
+    };
+    const timer = window.setInterval(refreshWhenVisible, 30_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refreshAccountUsage, runtime.phase]);
 
   const refreshRuntimeIdentity = useCallback(async () => {
     try {
@@ -757,6 +820,11 @@ export function useAgentRuntime(
       else if (message.method) appendRuntimeLog("event", message.method);
       else if (message.id != null) {
         appendRuntimeLog(message.error ? "stderr" : "event", `response ${String(message.id)}`);
+      }
+
+      if (message.method === "account/rateLimits/updated") {
+        void refreshAccountUsage();
+        return;
       }
 
       if (message.method === "serverRequest/resolved") {
@@ -1353,6 +1421,7 @@ export function useAgentRuntime(
                appendRuntimeLog("system", "Agent runtime stopped.");
               setAccount(null);
                setAccountUsage(null);
+               setRateLimits(null);
                setModels([]);
                 setThreadUsage({});
                 setQuestionRequest(null);
@@ -1508,7 +1577,7 @@ export function useAgentRuntime(
         turnStartedAt: Date.now(),
         error: null,
       }));
-      let threadId = sessionIds.current.get(activeTaskId);
+      let threadId = sessionIds.current.get(activeTaskId) ?? activeTaskThreadId ?? undefined;
 
       try {
         const needsSession = needsAgentSession(
@@ -1601,6 +1670,7 @@ export function useAgentRuntime(
       activeTaskReasoningEffort,
       activeTaskSandboxMode,
       activeTaskTitle,
+      activeTaskThreadId,
       activeTaskTimeline,
       runtime.phase,
       sendTurn,
@@ -1919,7 +1989,7 @@ export function useAgentRuntime(
     [],
   );
 
-  const activeThreadId = sessionIds.current.get(activeTaskId) ?? null;
+  const activeThreadId = sessionIds.current.get(activeTaskId) ?? activeTaskThreadId ?? null;
   const compacting = compactingTaskId === activeTaskId;
   const canCompact = runtime.phase === "ready" && Boolean(activeThreadId) && compactingTaskId === null;
   const canUndo = runtime.phase === "ready" && Boolean(
@@ -1933,6 +2003,7 @@ export function useAgentRuntime(
     runtime,
     account,
     accountUsage,
+    rateLimits,
     models,
     timeline: activeTaskTimeline,
     runtimeLogs,

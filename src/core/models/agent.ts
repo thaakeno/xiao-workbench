@@ -197,6 +197,37 @@ export type AgentAccountUsage = {
   dailyUsageBuckets: Array<{ startDate: string; tokens: number }>;
 };
 
+export type AgentRateLimitWindow = {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+};
+
+export type AgentRateLimits = {
+  primary: AgentRateLimitWindow | null;
+  secondary: AgentRateLimitWindow | null;
+  creditsRemaining: number | null;
+  updatedAt: number;
+};
+
+export type CodexThreadSummary = {
+  id: string;
+  title: string;
+  preview: string;
+  cwd: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+};
+
+export type AgentThreadTokenUsage = TokenUsageBreakdown & {
+  threadId: string;
+  model: string | null;
+  originator: string | null;
+  updatedAt: number;
+  dailyUsageBuckets: Array<{ startDate: string; tokens: number }>;
+};
+
 export type AgentModelSummary = {
   id: string;
   model: string;

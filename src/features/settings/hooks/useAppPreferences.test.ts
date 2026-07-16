@@ -26,6 +26,7 @@ describe("normalizeAppPreferences", () => {
     });
 
     expect(preferences).toEqual({
+      importCodexHistory: true,
       showReasoningSummaries: false,
       expandToolOutput: true,
       focusNewTasks: false,

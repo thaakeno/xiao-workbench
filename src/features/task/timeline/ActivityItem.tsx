@@ -15,6 +15,9 @@ type ActivityItemProps = {
     decision: "accept" | "decline",
   ) => Promise<void>;
   onReviewChanges: () => void;
+  canUndo: boolean;
+  undoing: boolean;
+  onUndo: () => void;
 };
 
 const iconByKind: Record<TimelineEntry["kind"], XiaoIconName> = {
@@ -93,6 +96,9 @@ export function ActivityItem({
   taskId,
   onResolveApproval,
   onReviewChanges,
+  canUndo,
+  undoing,
+  onUndo,
 }: ActivityItemProps) {
   const waitingForApproval = entry.kind === "approval" && entry.status === "warning";
   const userMessage = entry.kind === "brief" || entry.kind === "user";
@@ -297,9 +303,19 @@ export function ActivityItem({
         style={{ "--activity-index": index } as React.CSSProperties}
       >
         <div className="patch-activity__heading">
-          <strong>Patch</strong>
-          <span>{entry.files.length} {entry.files.length === 1 ? "file" : "files"}</span>
-          <small><b>+{additions}</b><em>-{deletions}</em></small>
+          <span className="patch-activity__mark"><XiaoIcon name="mutation" size={17} /></span>
+          <span className="patch-activity__summary">
+            <strong>Edited {entry.files.length} {entry.files.length === 1 ? "file" : "files"}</strong>
+            <small><b>+{additions}</b><em>-{deletions}</em></small>
+          </span>
+          <span className="patch-activity__actions">
+            {canUndo || undoing ? (
+              <button type="button" disabled={!canUndo || undoing} onClick={onUndo}>
+                {undoing ? "Undoing" : "Undo"} <XiaoIcon name="undo" size={13} />
+              </button>
+            ) : null}
+            <button type="button" onClick={onReviewChanges}>Review</button>
+          </span>
         </div>
         <div className="patch-activity__files">
           {entry.files.map((file) => {
@@ -339,9 +355,6 @@ export function ActivityItem({
             );
           })}
         </div>
-        <button className="patch-activity__review" type="button" onClick={onReviewChanges}>
-          Open review <XiaoIcon name="external" size={12} />
-        </button>
       </article>
     );
   }

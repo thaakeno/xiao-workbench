@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Xiao Workbench",
-        "width": 1440,
-        "height": 900,
+        "width": 1280,
+        "height": 780,
         "minWidth": 980,
         "minHeight": 680,
         "center": true,
