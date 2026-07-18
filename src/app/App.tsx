@@ -611,7 +611,6 @@ export function App() {
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [taskWorkspacePath, setTaskWorkspacePath] = useState(startupTaskCache?.path ?? "");
   const [taskStateReady, setTaskStateReady] = useState(Boolean(startupTaskCache) || !isTauriHost());
-  const [startupComplete, setStartupComplete] = useState(Boolean(startupTaskCache));
   const [taskLoadError, setTaskLoadError] = useState<string | null>(null);
   const [taskHistoryError, setTaskHistoryError] = useState<string | null>(null);
   const [taskSaveError, setTaskSaveError] = useState<string | null>(null);
@@ -675,6 +674,7 @@ export function App() {
     refresh,
     loadDirectory,
   } = useWorkspace(activeProjectPath, executionTaskId);
+  const hydrationPath = activeProjectPath ?? (!loading ? workspace.path : "");
   const routineController = useRoutines(workspace.path);
   const activeTaskHistoryLoading = Boolean(
     selectedTask && taskHistoryLoadingId === selectedTask.id && !taskHistoryError,
@@ -840,12 +840,13 @@ export function App() {
           writeStartupProjects(next);
           return next;
         });
+        if (!activeProjectPath && visible[0]?.path) setActiveProjectPath(visible[0].path);
       })
       .catch(() => undefined);
   }, [activeProjectPath]);
 
   useEffect(() => {
-    if (loading || nativeWorkspaceLoadedRef.current.has(workspace.path)) return;
+    if (!hydrationPath || nativeWorkspaceLoadedRef.current.has(hydrationPath)) return;
     let cancelled = false;
     setTaskStateReady(false);
     setTaskLoadError(null);
@@ -857,11 +858,11 @@ export function App() {
       try {
         const loadedState = isTauriHost()
           ? await nativeBridge
-              .loadXiaoWorkspace(workspace.path)
+              .loadXiaoWorkspace(hydrationPath)
               .then((document) => (document ? stateFromDocument(document) : defaultTaskState()))
           : readBrowserTaskState(workspace.path);
         const workspaceThreads = preferences.importCodexHistory
-          ? codexThreads.filter((thread) => sameWorkspacePath(thread.cwd, workspace.path))
+          ? codexThreads.filter((thread) => sameWorkspacePath(thread.cwd, hydrationPath))
           : [];
         const nextState = ensureValidActiveTask({
           ...loadedState,
@@ -869,14 +870,14 @@ export function App() {
         });
         if (isTauriHost()) {
           persistedWorkspaceSnapshotsRef.current.set(
-            workspace.path,
+            hydrationPath,
             snapshotFromState(nextState),
           );
         }
         if (cancelled) return;
         const openWithoutTask = openProjectWithoutTaskRef.current;
         openProjectWithoutTaskRef.current = false;
-        nativeWorkspaceLoadedRef.current.add(workspace.path);
+        nativeWorkspaceLoadedRef.current.add(hydrationPath);
         const pendingThreadId = pendingCodexThreadRef.current;
         const pendingTaskId = pendingThreadId ? `codex:${pendingThreadId}` : null;
         setTasks(nextState.tasks);
@@ -891,21 +892,24 @@ export function App() {
         setDraftTask(nextDraft);
         setOpenTaskIds(nextState.activeTaskId ? [nextState.activeTaskId] : []);
         setDraftTabOpen(nextState.activeTaskId === null);
-        setTaskWorkspacePath(workspace.path);
+        setTaskWorkspacePath(hydrationPath);
         setRestoredAttachmentsByTask({});
         setTaskHistoryLoadingId(null);
         setSendingFollowUpId(null);
         setFailedFollowUpId(null);
         setTaskStateReady(true);
-        writeStartupTaskState(workspace.path, nextState);
+        writeStartupTaskState(hydrationPath, nextState);
         setProjects((current) => {
           const next = applyProjectPreferences(
             mergeProject(current, {
-              path: workspace.path,
-              name: workspace.name,
+              path: hydrationPath,
+              name:
+                current.find((project) => project.path === hydrationPath)?.name ??
+                hydrationPath.split(/[\\/]/).filter(Boolean).at(-1) ??
+                hydrationPath,
               updatedAt:
                 Math.max(0, ...nextState.tasks.map((task) => task.updatedAt)) ||
-                current.find((project) => project.path === workspace.path)?.updatedAt ||
+                current.find((project) => project.path === hydrationPath)?.updatedAt ||
                 Date.now(),
               taskCount: nextState.tasks.length,
             }),
@@ -922,7 +926,7 @@ export function App() {
         setOpenTaskIds([]);
         setDraftTabOpen(true);
         setTaskHistoryLoadingId(null);
-        setTaskWorkspacePath(workspace.path);
+        setTaskWorkspacePath(hydrationPath);
         setTaskLoadError(reason instanceof Error ? reason.message : String(reason));
       }
     };
@@ -931,11 +935,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [codexThreads, loading, preferences.importCodexHistory, taskWorkspacePath, workspace.name, workspace.path]);
-
-  useEffect(() => {
-    if (!startupComplete && taskStateReady && !loading) setStartupComplete(true);
-  }, [loading, startupComplete, taskStateReady]);
+  }, [codexThreads, hydrationPath, preferences.importCodexHistory, preferences.taskRunDefaults]);
 
   useEffect(() => {
     setTaskHistoryError(null);
@@ -2221,12 +2221,6 @@ export function App() {
   return (
     <>
       <GlobalContextMenu />
-      {!startupComplete ? (
-        <div className="startup-gate" role="status" aria-label="Loading Xiao Workbench">
-          <span className="startup-gate__mark"><img src="/xiao-mark.png" alt="" /></span>
-          <small>Preparing your workspace</small>
-        </div>
-      ) : null}
       <AppShell
         sidebarOpen={sidebarOpen}
         onCloseSidebar={closeSidebar}
