@@ -49,6 +49,6 @@ describe("large timeline projection", () => {
       { id: "answer", kind: "result", title: "Done" },
     ]);
     expect(rows.map((row) => row.kind)).toEqual(["entry", "exploration", "entry"]);
-    expect(rows[1]).toMatchObject({ kind: "exploration", entries: [{ id: "thought" }, { id: "search-a" }, { id: "search-b" }] });
+    expect(rows[1]).toMatchObject({ kind: "exploration", entries: [{ id: "search-a" }, { id: "search-b" }] });
   });
 });

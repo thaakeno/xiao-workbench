@@ -245,7 +245,7 @@ export function ActivityItem({
             <b />
           </span>
           <span className="context-compaction__copy">
-            <strong>{entry.status === "active" ? "Compacting session context" : "Session context compacted"}</strong>
+            <strong>{entry.status === "active" ? "Compacting session context" : "Context compacted"}</strong>
             {entry.title && !/context compact/i.test(entry.title) ? <small>{entry.title}</small> : null}
           </span>
           {entry.status === "active" ? (
