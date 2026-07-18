@@ -1115,7 +1115,38 @@ export function App() {
     let disposed = false;
     let subscribed = false;
     let refreshTimer: number | undefined;
+    let deltaFrame: number | undefined;
     let unlisten: (() => void) | undefined;
+    const pendingDeltas = new Map<string, { text: string; turnId?: string }>();
+
+    const flushDeltas = () => {
+      deltaFrame = undefined;
+      if (disposed || !pendingDeltas.size) return;
+      const deltas = new Map(pendingDeltas);
+      pendingDeltas.clear();
+      setTasks((current) => current.map((task) => {
+        if (task.id !== taskId || !task.timelineLoaded) return task;
+        const missing = new Map(deltas);
+        const timeline = task.timeline.map((entry) => {
+          const delta = deltas.get(entry.id);
+          if (!delta) return entry;
+          missing.delete(entry.id);
+          return { ...entry, body: `${entry.body ?? ""}${delta.text}`, status: "active" as const };
+        });
+        for (const [itemId, delta] of missing) timeline.push({
+          id: itemId,
+          kind: "result" as const,
+          title: "Agent response",
+          body: delta.text,
+          createdAt: Date.now(),
+          meta: "Streaming",
+          status: "active" as const,
+          turnId: delta.turnId,
+          messagePhase: "commentary" as const,
+        });
+        return { ...task, timeline, timelineEntryCount: timeline.length };
+      }));
+    };
 
     const refreshTimeline = (delay = 80) => {
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
@@ -1172,25 +1203,9 @@ export function App() {
           const itemId = typeof params.itemId === "string" ? params.itemId : null;
           if (!itemId) return;
           const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
-          setTasks((current) => current.map((task) => {
-            if (task.id !== taskId || !task.timelineLoaded) return task;
-            const existing = task.timeline.find((entry) => entry.id === itemId);
-            const timeline = existing
-              ? task.timeline.map((entry) => entry.id === itemId
-                ? { ...entry, body: `${entry.body ?? ""}${params.delta}`, status: "active" as const }
-                : entry)
-              : [...task.timeline, {
-                id: itemId,
-                kind: "result" as const,
-                title: "Agent response",
-                body: params.delta as string,
-                createdAt: Date.now(),
-                meta: "Streaming",
-                status: "active" as const,
-                turnId,
-              }];
-            return { ...task, timeline, timelineEntryCount: timeline.length };
-          }));
+          const pending = pendingDeltas.get(itemId);
+          pendingDeltas.set(itemId, { text: `${pending?.text ?? ""}${params.delta}`, turnId });
+          if (deltaFrame === undefined) deltaFrame = window.requestAnimationFrame(flushDeltas);
           return;
         }
         if (method === "item/completed") {
@@ -1219,6 +1234,7 @@ export function App() {
       disposed = true;
       unlisten?.();
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (deltaFrame !== undefined) window.cancelAnimationFrame(deltaFrame);
       if (subscribed) void nativeBridge.unsubscribeCodexThread(threadId).catch(() => undefined);
     };
   }, [activeTask.id, activeTask.origin, activeTask.threadId, preferences.importCodexHistory]);
@@ -2676,9 +2692,23 @@ export function App() {
     last: savedThreadUsage,
     modelContextWindow: selectedContextWindow,
   } : null);
-  const displayRuntime = activeTask.origin === "codex" && system.codexVersion
-    ? { ...agent.runtime, phase: "ready" as const, taskId: null, error: null }
+  const importedTaskWorking = activeTask.origin === "codex" && externalCodexRunningIds.includes(activeTask.id);
+  const importedTurnStartedAt = importedTaskWorking
+    ? [...activeTask.timeline].reverse().find((entry) =>
+        (entry.kind === "user" || entry.kind === "brief") && entry.createdAt,
+      )?.createdAt ?? Date.now()
+    : null;
+  const displayRuntime = activeTask.origin === "codex"
+    ? {
+        ...agent.runtime,
+        phase: importedTaskWorking ? "working" as const : "ready" as const,
+        taskId: importedTaskWorking ? activeTask.id : null,
+        threadId: activeTask.threadId ?? null,
+        turnStartedAt: importedTurnStartedAt,
+        error: null,
+      }
     : agent.runtime;
+  const displayTimeline = activeTask.origin === "codex" ? activeTask.timeline : agent.timeline;
 
   return (
     <>
@@ -2852,7 +2882,7 @@ export function App() {
               launchMode={focusedLaunch}
               taskStateError={taskStateError}
               taskStateLoading={activeTaskHistoryLoading}
-              timeline={agent.timeline}
+              timeline={displayTimeline}
               runtime={displayRuntime}
               latestRun={agent.latestRun}
               models={visibleModels}
@@ -2980,7 +3010,7 @@ export function App() {
               task={activeTask}
               executionTaskId={executionTaskId}
               executionTransitioning={activeEnvironmentBusy}
-              timeline={agent.timeline}
+              timeline={displayTimeline}
               models={agent.models}
               contextUsage={activeContextUsage}
               plan={activeTask.plan}

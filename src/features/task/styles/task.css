@@ -501,11 +501,11 @@
 .message-navigator {
   position: absolute;
   z-index: 8;
-  top: 50%;
+  top: calc(50% - 34px);
   right: 9px;
   width: 16px;
-  height: min(58vh, 520px);
-  max-height: calc(100% - 220px);
+  height: clamp(180px, 46vh, 420px);
+  max-height: calc(100% - 260px);
   overflow: visible;
   pointer-events: auto;
   transform: translateY(-50%);
@@ -662,12 +662,12 @@
 }
 
 .activity--assistant-message {
-  margin: 0 0 18px;
+  margin: 0 0 12px;
 }
 
 .activity__assistant-message {
   min-width: 0;
-  padding: 8px 2px 12px;
+  padding: 4px 2px 8px;
 }
 
 .activity__message-actions {
@@ -844,7 +844,7 @@
 }
 
 .exploration-group {
-  margin: 4px 0 11px;
+  margin: 2px 0 9px;
   color: var(--muted);
   font-size: var(--text-label);
 }
@@ -909,7 +909,7 @@
 .exploration-group__items {
   display: grid;
   gap: 2px;
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   padding: 5px;
   border: 1px solid var(--line);
   border-top: 0;
@@ -1317,7 +1317,8 @@
 .context-compaction {
   position: relative;
   display: flex;
-  width: min(100%, 460px);
+  width: fit-content;
+  max-width: min(100%, 520px);
   min-height: 34px;
   align-items: center;
   gap: 11px;
@@ -1398,7 +1399,6 @@
 .context-compaction__copy {
   position: relative;
   z-index: 1;
-  display: grid;
   min-width: 0;
   display: flex;
   align-items: baseline;
@@ -1406,11 +1406,15 @@
 }
 
 .context-compaction__copy small {
+  max-width: 240px;
+  overflow: hidden;
   color: var(--muted);
   font-size: var(--text-micro);
   font-weight: 560;
   letter-spacing: 0;
   text-transform: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .context-compaction__copy strong {
@@ -1427,7 +1431,7 @@
   position: relative;
   z-index: 1;
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-left: 1px;
 }
 
 .context-compaction__state--success { color: var(--success); }

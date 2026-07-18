@@ -94,12 +94,14 @@ export const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
     while (end < timeline.length && timeline[end].kind !== "user" && timeline[end].kind !== "brief") end += 1;
     const segment = timeline.slice(index, end);
     const executionEntries = segment.filter((item) =>
-      item.kind === "explore" || item.kind === "command" || item.kind === "thought" ||
+      item.kind === "explore" || item.kind === "command" ||
       (item.kind === "result" && item.messagePhase === "commentary"),
     );
     if (executionEntries.length) rows.push({ kind: "exploration", entries: executionEntries, index: index + 1 });
     segment.slice(1).forEach((item, offset) => {
-      if (!executionEntries.includes(item)) rows.push({ kind: "entry", entry: item, index: index + offset + 1 });
+      if (item.kind !== "thought" && !executionEntries.includes(item)) {
+        rows.push({ kind: "entry", entry: item, index: index + offset + 1 });
+      }
     });
     index = end;
   }
@@ -139,6 +141,9 @@ export function TaskTimeline({
     [latestUserIndex, taskWorking, timeline],
   );
   const rows = useMemo(() => timelineRows(displayTimeline), [displayTimeline]);
+  const activeExplorationRow = taskWorking
+    ? rows.reduce((latest, row, index) => row.kind === "exploration" ? index : latest, -1)
+    : -1;
   const latestChangeId = [...displayTimeline].reverse().find((entry) => entry.kind === "change")?.id;
   const latestUserId = [...displayTimeline].reverse().find((entry) => entry.kind === "user")?.id;
   return (
@@ -159,13 +164,12 @@ export function TaskTimeline({
           <p>Describe the outcome below. Xiao will keep the work, commands, and changes in this task.</p>
         </div>
       ) : null}
-      {rows.map((row) =>
+      {rows.map((row, rowIndex) =>
         row.kind === "exploration" ? (
           <ExplorationGroup
             entries={row.entries}
-            expandByDefault={expandToolOutput}
             index={row.index}
-            startedAt={taskWorking ? runtime.turnStartedAt : null}
+            startedAt={rowIndex === activeExplorationRow ? runtime.turnStartedAt : null}
             key={`exploration-${row.entries.map((entry) => entry.id).join("-")}`}
           />
         ) : (
@@ -189,7 +193,7 @@ export function TaskTimeline({
           </div>
         ),
       )}
-      <LiveTurnStatus taskId={taskId} runtime={runtime} timeline={timeline} />
+      {activeExplorationRow < 0 ? <LiveTurnStatus taskId={taskId} runtime={runtime} timeline={timeline} /> : null}
     </div>
   );
 }

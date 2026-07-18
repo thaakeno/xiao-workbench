@@ -6,7 +6,6 @@ import type { AgentExplorationAction, TimelineEntry } from "../../../core/models
 type ExplorationGroupProps = {
   entries: TimelineEntry[];
   index: number;
-  expandByDefault: boolean;
   startedAt: number | null;
 };
 
@@ -42,8 +41,9 @@ const elapsedLabel = (elapsedMs: number) => {
 const operationLabel = (operation: string, count: number) =>
   `${operation.charAt(0).toUpperCase()}${operation.slice(1)} ${count} ${count === 1 ? "time" : "times"}`;
 
-export function ExplorationGroup({ entries, index, expandByDefault, startedAt }: ExplorationGroupProps) {
+export function ExplorationGroup({ entries, index, startedAt }: ExplorationGroupProps) {
   const [now, setNow] = useState(Date.now);
+  const [open, setOpen] = useState(Boolean(startedAt));
   const actions = useMemo<ProjectedAction[]>(() => entries.flatMap((entry) => {
     const plugin = entry.meta === "Plugin tool";
     const [provider, operation] = plugin ? entry.title.split(" · ", 2) : [null, null];
@@ -54,7 +54,7 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
         : [];
     return projected.map((action) => ({ action, entryId: entry.id, status: entry.status, provider, operation }));
   }), [entries]);
-  const active = entries.some((entry) => entry.status === "active");
+  const active = startedAt != null || entries.some((entry) => entry.status === "active");
   const failed = entries.some((entry) => entry.status === "error");
   const firstEventAt = entries.find((entry) => entry.createdAt)?.createdAt ?? null;
   const lastEventAt = [...entries].reverse().find((entry) => entry.createdAt)?.createdAt ?? null;
@@ -69,13 +69,16 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
   }, [actions]);
   const webActions = actions.filter(({ action, provider }) => !provider && action.kind === "web");
   const otherActions = actions.filter(({ action, provider }) => !provider && action.kind !== "web");
-  const thoughts = entries.filter((entry) => entry.kind === "thought" && entry.body?.trim());
   const commentary = entries.filter((entry) => entry.kind === "result" && entry.messagePhase === "commentary" && entry.body?.trim());
 
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
+  }, [active]);
+
+  useEffect(() => {
+    setOpen(active);
   }, [active]);
 
   const actionRow = ({ action, entryId, status }: ProjectedAction, actionIndex: number) => (
@@ -88,7 +91,7 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
 
   return (
     <article className={`activity exploration-group ${active ? "is-active" : ""} ${failed ? "is-error" : ""}`} style={{ "--activity-index": index } as React.CSSProperties}>
-      <details open={active || expandByDefault}>
+      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary><strong>{active ? "Working for" : "Worked for"} {elapsed}</strong>{active ? <i className="activity__pulse" /> : null}<XiaoIcon className="exploration-group__caret" name="caret" size={12} /></summary>
         <div className="exploration-group__items">
           {toolProviders.map(([provider, providerActions]) => {
@@ -104,7 +107,6 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
             <div className="exploration-tool-group__queries">{webActions.map(actionRow)}</div>
           </details> : null}
           {otherActions.map(actionRow)}
-          {thoughts.map((thought) => <div className="exploration-group__thought" key={thought.id}><XiaoIcon name="approach" size={13} /><div><strong>Thought</strong><span>{thought.body}</span></div></div>)}
           {commentary.map((message) => <div className="exploration-group__commentary markdown-body" key={message.id}>{message.body}</div>)}
         </div>
       </details>

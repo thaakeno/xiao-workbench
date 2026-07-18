@@ -136,6 +136,12 @@ const taskChangeSummary = (task: WorkbenchTask, fallback?: ThreadChangeSummary |
   return fallback ?? null;
 };
 
+type CodexThreadMenuState = {
+  threadId: string;
+  top: number;
+  left: number;
+};
+
 const isSidebarDraft = (task: WorkbenchTask) =>
   !task.threadId && !task.timeline.length && !task.draftText.trim() && task.title === "New task";
 
@@ -183,6 +189,7 @@ export function Sidebar({
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
   const [renamingProject, setRenamingProject] = useState<RenamingProject | null>(null);
   const [taskMenu, setTaskMenu] = useState<TaskMenuState | null>(null);
+  const [codexThreadMenu, setCodexThreadMenu] = useState<CodexThreadMenuState | null>(null);
   const [renamingTask, setRenamingTask] = useState<RenamingTask | null>(null);
   const [now, setNow] = useState(Date.now);
   const [usageDetailsOpen, setUsageDetailsOpen] = useState(false);
@@ -190,6 +197,7 @@ export function Sidebar({
   const projectMenuTriggerRef = useRef<HTMLElement | null>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuTriggerRef = useRef<HTMLElement | null>(null);
+  const codexThreadMenuRef = useRef<HTMLDivElement>(null);
   const visibleTasks = useMemo(() => [...tasks]
     .filter((task) =>
       !task.archived &&
@@ -222,6 +230,7 @@ export function Sidebar({
   }, [now, visibleTasks]);
   const menuProject = projects.find((project) => project.path === projectMenu?.projectPath);
   const menuTask = tasks.find((task) => task.id === taskMenu?.taskId);
+  const menuCodexThread = codexThreads.find((thread) => thread.id === codexThreadMenu?.threadId);
   const workingTasks = new Set(workingTaskIds);
   const projectSwitchLocked = workingTasks.size > 0;
   const initials = profileInitials(profile.name);
@@ -246,6 +255,21 @@ export function Sidebar({
     setTaskMenu(null);
     if (restoreFocus) window.requestAnimationFrame(() => trigger?.focus());
   };
+
+  useEffect(() => {
+    if (!codexThreadMenu) return;
+    const close = (event: PointerEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event instanceof PointerEvent && codexThreadMenuRef.current?.contains(event.target as Node)) return;
+      setCodexThreadMenu(null);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [codexThreadMenu]);
 
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -779,18 +803,29 @@ export function Sidebar({
               <div className="sidebar-other-chats__list">
                 {otherCodexThreads.map((thread) => {
                   const selected = activePage === "tasks" && activeTaskId === `codex:${thread.id}`;
+                  const running = thread.status === "active" || workingTasks.has(`codex:${thread.id}`);
                   return (
                     <button
-                      className={selected ? "is-selected" : ""}
+                      className={`${selected ? "is-selected" : ""} ${running ? "is-running" : ""}`}
                       key={thread.id}
                       type="button"
                       title={`${thread.title}\n${thread.cwd}`}
                       disabled={projectSwitchLocked && !selected}
                       onFocus={() => onPrefetchCodexThread(thread.id)}
                       onPointerEnter={() => onPrefetchCodexThread(thread.id)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        const width = 220;
+                        const height = 176;
+                        setCodexThreadMenu({
+                          threadId: thread.id,
+                          left: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
+                          top: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)),
+                        });
+                      }}
                       onClick={() => onSelectCodexThread(thread)}
                     >
-                      <span>{thread.title}</span>
+                      <span>{thread.title}{running ? <XiaoIcon className="sidebar-other-chats__spinner" name="pending" size={13} /> : null}</span>
                       <small>{thread.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? "Outside projects"} · {relativeTime(thread.updatedAt, now)}</small>
                     </button>
                   );
@@ -1031,6 +1066,34 @@ export function Sidebar({
             document.body,
           )
         : null}
+
+      {codexThreadMenu && menuCodexThread ? createPortal(
+        <div
+          className="project-actions-menu task-actions-menu"
+          ref={codexThreadMenuRef}
+          role="menu"
+          aria-label={`Actions for ${menuCodexThread.title}`}
+          style={{ top: codexThreadMenu.top, left: codexThreadMenu.left }}
+        >
+          <button role="menuitem" onClick={() => {
+            setCodexThreadMenu(null);
+            onSelectCodexThread(menuCodexThread);
+          }}><XiaoIcon name="taskQueue" size={15} /><span>Open chat</span></button>
+          <button role="menuitem" onClick={() => {
+            copyText(menuCodexThread.title);
+            setCodexThreadMenu(null);
+          }}><XiaoIcon name="copy" size={15} /><span>Copy title</span></button>
+          <button role="menuitem" onClick={() => {
+            copyText(menuCodexThread.cwd);
+            setCodexThreadMenu(null);
+          }}><XiaoIcon name="folderOpen" size={15} /><span>Copy working directory</span></button>
+          <button role="menuitem" onClick={() => {
+            copyText(menuCodexThread.id);
+            setCodexThreadMenu(null);
+          }}><XiaoIcon name="copy" size={15} /><span>Copy session ID</span></button>
+        </div>,
+        document.body,
+      ) : null}
 
       {usageDetailsOpen ? (
         <UsageDetailsDialog

@@ -245,8 +245,8 @@ export function ActivityItem({
             <b />
           </span>
           <span className="context-compaction__copy">
-            <small>Session context</small>
-            <strong>{entry.title}</strong>
+            <strong>{entry.status === "active" ? "Compacting session context" : "Session context compacted"}</strong>
+            {entry.title && !/context compact/i.test(entry.title) ? <small>{entry.title}</small> : null}
           </span>
           {entry.status === "active" ? (
             <i className="activity__pulse" aria-hidden="true" />
