@@ -112,8 +112,7 @@ const relativeTime = (timestamp: number, now: number) => {
   return sidebarDateFormatter.format(new Date(timestamp));
 };
 
-const groupForTask = (task: WorkbenchTask, activeTaskId: string, now: number) => {
-  if (task.id === activeTaskId) return "Active";
+const groupForTask = (task: WorkbenchTask, now: number) => {
   const today = startOfDay(now);
   const taskDay = startOfDay(task.updatedAt);
   if (taskDay === today) return "Today";
@@ -198,10 +197,10 @@ export function Sidebar({
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, WorkbenchTask[]>();
     for (const task of visibleTasks) {
-      const group = groupForTask(task, activeTaskId, now);
+      const group = groupForTask(task, now);
       groups.set(group, [...(groups.get(group) ?? []), task]);
     }
-    const priority = ["Active", "Today", "Yesterday", "This week", "Earlier this month"];
+    const priority = ["Today", "Yesterday", "This week", "Earlier this month"];
     return [...groups]
       .map(([group, groupTasks]) => ({ group, tasks: groupTasks }))
       .sort((left, right) => {
@@ -212,7 +211,7 @@ export function Sidebar({
         if (rightIndex < 0) return -1;
        return leftIndex - rightIndex;
       });
-  }, [activeTaskId, now, visibleTasks]);
+  }, [now, visibleTasks]);
   const menuProject = projects.find((project) => project.path === projectMenu?.projectPath);
   const menuTask = tasks.find((task) => task.id === taskMenu?.taskId);
   const workingTasks = new Set(workingTaskIds);

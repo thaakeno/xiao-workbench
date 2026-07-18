@@ -84,35 +84,20 @@ export const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
 
   while (index < timeline.length) {
     const entry = timeline[index];
-    if (!["explore", "command", "thought"].includes(entry.kind)) {
+    if (entry.kind !== "user" && entry.kind !== "brief") {
       rows.push({ kind: "entry", entry, index });
       index += 1;
       continue;
     }
-
+    rows.push({ kind: "entry", entry, index });
     let end = index + 1;
-    while (end < timeline.length && ["explore", "command", "thought"].includes(timeline[end].kind)) {
-      end += 1;
-    }
+    while (end < timeline.length && timeline[end].kind !== "user" && timeline[end].kind !== "brief") end += 1;
     const segment = timeline.slice(index, end);
-    const explorationEntries = segment.filter((item) => item.kind === "explore" || item.kind === "command");
-    if (!explorationEntries.length) {
-      segment.forEach((item, offset) =>
-        rows.push({ kind: "entry", entry: item, index: index + offset }),
-      );
-      index = end;
-      continue;
-    }
-
-    const lastExplorationId = explorationEntries.at(-1)?.id;
-    for (let offset = 0; offset < segment.length; offset += 1) {
-      const item = segment[offset];
-      if (item.kind === "thought") {
-        rows.push({ kind: "entry", entry: item, index: index + offset });
-      } else if (item.id === lastExplorationId) {
-        rows.push({ kind: "exploration", entries: explorationEntries, index: index + offset });
-      }
-    }
+    const executionEntries = segment.filter((item) => item.kind === "explore" || item.kind === "command" || item.kind === "thought");
+    if (executionEntries.length) rows.push({ kind: "exploration", entries: executionEntries, index: index + 1 });
+    segment.slice(1).forEach((item, offset) => {
+      if (!executionEntries.includes(item)) rows.push({ kind: "entry", entry: item, index: index + offset + 1 });
+    });
     index = end;
   }
 

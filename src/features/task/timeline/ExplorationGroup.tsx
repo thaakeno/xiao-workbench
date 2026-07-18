@@ -69,6 +69,7 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
   }, [actions]);
   const webActions = actions.filter(({ action, provider }) => !provider && action.kind === "web");
   const otherActions = actions.filter(({ action, provider }) => !provider && action.kind !== "web");
+  const thoughts = entries.filter((entry) => entry.kind === "thought" && entry.body?.trim());
 
   useEffect(() => {
     if (!active) return;
@@ -102,6 +103,7 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
             <div className="exploration-tool-group__queries">{webActions.map(actionRow)}</div>
           </details> : null}
           {otherActions.map(actionRow)}
+          {thoughts.map((thought) => <div className="exploration-group__thought" key={thought.id}><XiaoIcon name="approach" size={13} /><div><strong>Thought</strong><span>{thought.body}</span></div></div>)}
         </div>
       </details>
     </article>
