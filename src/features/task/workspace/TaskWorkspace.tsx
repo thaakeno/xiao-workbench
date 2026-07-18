@@ -17,8 +17,9 @@ import {
   type TimelineEntry,
 } from "../../../core/models/agent";
 import type { RunSnapshot } from "../../../core/models/run";
-import type { WorkspaceSnapshot } from "../../../core/models/workspace";
+import type { SystemInfo, WorkspaceSnapshot } from "../../../core/models/workspace";
 import type { XiaoWorkspaceMode } from "../../../core/models/xiao";
+import { TerminalPanel } from "../../focus-rail/components/TerminalPanel";
 import type { FocusView } from "../../focus-rail/focus-rail.types";
 import { Composer } from "../composer/Composer";
 import { TaskTimeline } from "../timeline/TaskTimeline";
@@ -70,6 +71,8 @@ type TaskWorkspaceProps = {
   historyLoadingOlder: boolean;
   launchBrand: "logo" | "wordmark";
   workspace: WorkspaceSnapshot;
+  system: SystemInfo;
+  bottomTerminalOpen: boolean;
   onSubmit: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
   onQueueFollowUp: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
   onRemoveFollowUp: (followUpId: string) => void;
@@ -152,6 +155,8 @@ export function TaskWorkspace({
   historyLoadingOlder,
   launchBrand,
   workspace,
+  system,
+  bottomTerminalOpen,
   onSubmit,
   onQueueFollowUp,
   onRemoveFollowUp,
@@ -372,7 +377,7 @@ export function TaskWorkspace({
   }
 
   return (
-    <section className="task-workspace">
+    <section className={`task-workspace${bottomTerminalOpen ? " has-bottom-terminal" : ""}`}>
       <TaskHeader
         taskId={taskId}
         taskTitle={taskTitle}
@@ -424,6 +429,17 @@ export function TaskWorkspace({
       <MessageNavigator timeline={timeline} onJump={scrollToEntry} />
       {showScrollBottom ? <button className="task-scroll-bottom" type="button" aria-label="Scroll to latest message" title="Scroll to bottom" onClick={scrollToBottom}><XiaoIcon name="send" size={16} /></button> : null}
       {composer}
+      {bottomTerminalOpen ? (
+        <div className="task-workspace__bottom-terminal">
+          <TerminalPanel
+            active
+            workspace={workspace}
+            taskId={executionTaskId}
+            system={system}
+            transitioning={environmentBusy}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -20,6 +20,7 @@ import type {
 import type { ManagedWorktreeSummary } from "../../../core/models/workspace";
 import type { XiaoWorkspaceMode } from "../../../core/models/xiao";
 import type { FocusView } from "../../focus-rail/focus-rail.types";
+import { ImageLightbox } from "../media/ImageLightbox";
 import { fileMentionAtCursor, removeFileMention, type FileMention } from "./fileMention";
 import { ModelPicker } from "./ModelPicker";
 import {
@@ -196,6 +197,7 @@ export function Composer({
   const [value, setValue] = useState(draftText);
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const [selectingAttachments, setSelectingAttachments] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [goalEditorOpen, setGoalEditorOpen] = useState(false);
@@ -989,9 +991,11 @@ export function Composer({
                     ? attachment.url ?? (isTauriHost() ? convertFileSrc(attachment.path) : "")
                     : "";
                 return (
-                  <span className="composer__attachment" key={attachment.path} title={attachment.path}>
+                  <article className={`composer__attachment ${imageSource ? "is-image" : ""}`} key={attachment.path} title={attachment.path}>
                     {imageSource ? (
-                      <img src={imageSource} alt="" />
+                      <button className="composer__attachment-preview" type="button" onClick={() => setPreviewImage({ src: imageSource, name: attachment.name })}>
+                        <img src={imageSource} alt={attachment.name} />
+                      </button>
                     ) : (
                       <XiaoIcon name={attachment.kind === "directory" ? "folder" : "file"} size={14} />
                     )}
@@ -1007,11 +1011,12 @@ export function Composer({
                     >
                       <XiaoIcon name="close" size={13} />
                     </button>
-                  </span>
+                  </article>
                 );
               })}
             </div>
           )}
+          {previewImage ? <ImageLightbox src={previewImage.src} alt={previewImage.name} onClose={() => setPreviewImage(null)} /> : null}
           <textarea
             ref={textarea}
             autoFocus={autoFocus}

@@ -2612,6 +2612,8 @@ export function App() {
               historyLoadingOlder={Boolean(activeTask.historyLoadingOlder)}
               launchBrand={preferences.launchBrand}
               workspace={workspace}
+              system={system}
+              bottomTerminalOpen={focusPanelOpen && focusView === "terminal" && preferences.terminalPlacement === "bottom"}
               onModelChange={(model) => {
                 patchActiveTask({ model, reasoningEffort: null });
                 updateTaskRunDefaults({ model, reasoningEffort: null });
@@ -2691,7 +2693,7 @@ export function App() {
           )
         }
         focusRail={
-          activePage === "tasks" && focusPanelOpen ? (
+          activePage === "tasks" && focusPanelOpen && !(focusView === "terminal" && preferences.terminalPlacement === "bottom") ? (
             <FocusRail
               activeView={focusView}
               onViewChange={setFocusView}

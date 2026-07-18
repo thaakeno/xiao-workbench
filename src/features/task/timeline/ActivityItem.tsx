@@ -1,5 +1,10 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { useState } from "react";
+
 import { XiaoIcon, type XiaoIconName } from "../../../components/icons/XiaoIcon";
+import { isTauriHost } from "../../../core/bridges/tauri";
 import type { TimelineEntry } from "../../../core/models/agent";
+import { ImageLightbox } from "../media/ImageLightbox";
 import { CopyButton, MarkdownBody } from "./MarkdownBody";
 
 type ActivityItemProps = {
@@ -19,6 +24,7 @@ type ActivityItemProps = {
   onReviewChanges: () => void;
   workspacePath?: string;
   canUndo?: boolean;
+  canEditUser?: boolean;
   undoing?: boolean;
   onUndo?: () => void;
 };
@@ -103,14 +109,23 @@ export function ActivityItem({
   onReviewChanges,
   workspacePath = "",
   canUndo = false,
+  canEditUser = false,
   undoing = false,
   onUndo = () => undefined,
 }: ActivityItemProps) {
   const [allFilesVisible, setAllFilesVisible] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const waitingForApproval = entry.kind === "approval" && entry.status === "warning";
   const userMessage = entry.kind === "brief" || entry.kind === "user";
   const assistantMessage = entry.kind === "result" && entry.title === "Agent response";
   const contextCompaction = entry.kind === "result" && entry.meta === "Context";
+  const timestamp = entry.createdAt ? new Date(entry.createdAt) : null;
+  const ageMinutes = timestamp ? Math.max(0, Math.floor((Date.now() - timestamp.getTime()) / 60_000)) : null;
+  const timeLabel = timestamp
+    ? ageMinutes != null && ageMinutes < 60
+      ? ageMinutes < 1 ? "just now" : `${ageMinutes}m ago`
+      : timestamp.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : null;
 
   if (entry.kind === "thought" && entry.status !== "active" && !entry.body?.trim()) return null;
 
@@ -132,6 +147,7 @@ export function ActivityItem({
 
   if (userMessage) {
     const reviewComments = entry.attachments?.filter((attachment) => attachment.kind === "review") ?? [];
+    const images = entry.attachments?.filter((attachment) => attachment.kind === "image") ?? [];
     return (
       <article
         className="activity activity--user-message"
@@ -139,6 +155,10 @@ export function ActivityItem({
       >
         <div className="activity__user-message-content">
           <div className="activity__user-bubble">{entry.body ?? entry.title}</div>
+          {images.length ? <div className="activity__message-images">{images.map((image) => {
+            const src = image.url ?? (isTauriHost() ? convertFileSrc(image.path) : "");
+            return src ? <button type="button" key={image.path} onClick={() => setPreviewImage({ src, name: image.name })}><img src={src} alt={image.name} /></button> : null;
+          })}</div> : null}
           {reviewComments.length > 0 && (
             <div className="activity__review-comments">
               {reviewComments.map((comment) => {
@@ -156,18 +176,27 @@ export function ActivityItem({
               })}
             </div>
           )}
-          {entry.kind === "user" && canFork ? (
-            <div className="activity__user-actions">
+          <div className="activity__message-actions">
+            <CopyButton text={entry.body ?? entry.title} />
+            {entry.kind === "user" && canEditUser ? (
+              <button type="button" onClick={onUndo} disabled={undoing} title="Restore this message to the composer">
+                <XiaoIcon name="edit" size={12} />
+                {undoing ? "Restoring" : "Edit"}
+              </button>
+            ) : null}
+            {entry.kind === "user" && canFork ? (
               <button
                 type="button"
                 title="Create a new task from the conversation before this prompt"
                 onClick={() => onForkTask(entry.id)}
               >
                 <XiaoIcon name="branch" size={12} />
-                Fork from here
+                Fork
               </button>
-            </div>
-          ) : null}
+            ) : null}
+            {timeLabel ? <time dateTime={timestamp!.toISOString()} title={timestamp!.toLocaleString()}>{timeLabel}</time> : null}
+          </div>
+          {previewImage ? <ImageLightbox src={previewImage.src} alt={previewImage.name} onClose={() => setPreviewImage(null)} /> : null}
         </div>
       </article>
     );
@@ -182,8 +211,9 @@ export function ActivityItem({
         <div className="activity__assistant-message">
           {entry.body && <MarkdownBody content={entry.body} streaming={entry.status === "active"} />}
           {entry.body && (
-            <div className="activity__assistant-actions">
+            <div className="activity__assistant-actions activity__message-actions">
               <CopyButton text={entry.body} />
+              {timeLabel ? <time dateTime={timestamp!.toISOString()} title={timestamp!.toLocaleString()}>{timeLabel}</time> : null}
             </div>
           )}
         </div>
@@ -456,4 +486,3 @@ export function ActivityItem({
     </article>
   );
 }
-import { useState } from "react";

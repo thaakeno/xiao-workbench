@@ -23,6 +23,7 @@ export type AppPreferences = {
   fastMode: boolean;
   launchBrand: "logo" | "wordmark";
   wrapCode: boolean;
+  terminalPlacement: "right" | "bottom";
   notifyCompletions: boolean;
   notifyErrors: boolean;
   notifyApprovals: boolean;
@@ -49,6 +50,7 @@ const defaults: AppPreferences = {
   fastMode: false,
   launchBrand: "logo",
   wrapCode: false,
+  terminalPlacement: "right",
   notifyCompletions: true,
   notifyErrors: true,
   notifyApprovals: true,
@@ -103,6 +105,9 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
         ? stored.launchBrand
         : defaults.launchBrand,
     wrapCode: typeof stored.wrapCode === "boolean" ? stored.wrapCode : defaults.wrapCode,
+    terminalPlacement: stored.terminalPlacement === "bottom" || stored.terminalPlacement === "right"
+      ? stored.terminalPlacement
+      : defaults.terminalPlacement,
     notifyCompletions:
       typeof stored.notifyCompletions === "boolean" ? stored.notifyCompletions : defaults.notifyCompletions,
     notifyErrors: typeof stored.notifyErrors === "boolean" ? stored.notifyErrors : defaults.notifyErrors,

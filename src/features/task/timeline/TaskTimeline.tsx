@@ -152,6 +152,7 @@ export function TaskTimeline({
   );
   const rows = useMemo(() => timelineRows(displayTimeline), [displayTimeline]);
   const latestChangeId = [...displayTimeline].reverse().find((entry) => entry.kind === "change")?.id;
+  const latestUserId = [...displayTimeline].reverse().find((entry) => entry.kind === "user")?.id;
   return (
     <div className="timeline" aria-live="polite">
       {historyLoading ? (
@@ -193,6 +194,7 @@ export function TaskTimeline({
               canFork={canFork}
               onForkTask={onForkTask}
               canUndo={canUndo && row.entry.id === latestChangeId}
+              canEditUser={canUndo && row.entry.id === latestUserId}
               undoing={undoing && row.entry.id === latestChangeId}
               onUndo={onUndo}
             />

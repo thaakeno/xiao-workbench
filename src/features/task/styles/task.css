@@ -295,6 +295,21 @@
   overflow-anchor: none;
 }
 
+.task-workspace.has-bottom-terminal {
+  grid-template-rows: auto minmax(0, 1fr) auto minmax(180px, 30vh);
+}
+
+.task-workspace__bottom-terminal {
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: var(--code-surface);
+}
+
+.task-workspace__bottom-terminal .shell-workspace--pty {
+  height: 100%;
+}
+
 .task-header__runtime-tooltip {
   position: absolute;
   z-index: 40;
@@ -484,14 +499,20 @@
   display: flex;
   width: 14px;
   flex-direction: column;
-  justify-content: center;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 3px;
+  overflow-y: auto;
+  padding: 4px 0;
+  scrollbar-width: none;
   pointer-events: none;
 }
-.message-navigator button { position: relative; height: 5px; flex: 0 1 9px; pointer-events: auto; }
+.message-navigator::-webkit-scrollbar { display: none; }
+.message-navigator button { position: relative; min-height: 5px; height: 7px; flex: 0 0 7px; pointer-events: auto; }
 .message-navigator button > i { position: absolute; top: 50%; right: 0; width: 5px; height: 2px; border-radius: 99px; background: var(--muted); opacity: .48; transform: translateY(-50%); transition: width 150ms ease, height 150ms ease, opacity 150ms ease, background 150ms ease; }
 .message-navigator button:hover > i,
 .message-navigator button:focus-visible > i { width: 13px; height: 3px; background: var(--accent); opacity: 1; }
+.message-navigator button[data-distance="1"] > i { width: 10px; opacity: .78; }
+.message-navigator button[data-distance="2"] > i { width: 7px; opacity: .62; }
 .message-navigator button > span { position: absolute; right: 20px; top: 50%; display: grid; width: 320px; gap: 5px; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--surface-raised); box-shadow: 0 14px 40px rgb(0 0 0 / 24%); opacity: 0; pointer-events: none; transform: translate(8px, -50%) scale(.98); transition: opacity 120ms ease, transform 150ms ease; }
 .message-navigator button:hover > span,
 .message-navigator button:focus-visible > span { opacity: 1; transform: translate(0, -50%) scale(1); }
@@ -499,6 +520,12 @@
 .message-navigator small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .message-navigator strong { color: var(--text); font-size: var(--text-label); }
 .message-navigator small { color: var(--muted); font-size: var(--text-micro); }
+.message-navigator time { color: var(--muted); font-size: 10px; text-align: left; }
+.message-navigator button > span > em { display: flex; min-width: 0; flex-wrap: wrap; gap: 5px; font-style: normal; }
+.message-navigator button > span > em > b { display: inline-flex; min-width: 0; align-items: center; gap: 4px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-deep); font: inherit; font-size: 10px; }
+.message-navigator button > span > em span { max-width: 115px; overflow: hidden; color: var(--text-soft); text-overflow: ellipsis; white-space: nowrap; }
+.message-navigator button > span > em i { color: var(--success); font-style: normal; }
+.message-navigator button > span > em u { color: var(--danger); text-decoration: none; }
 
 .task-scroll-bottom {
   position: absolute;
@@ -633,6 +660,39 @@
   padding: 2px 10px 5px 14px;
   border-left: 2px solid color-mix(in srgb, var(--line-strong) 72%, transparent);
 }
+
+.activity__message-actions {
+  display: flex;
+  min-height: 25px;
+  align-items: center;
+  gap: 2px;
+  opacity: .45;
+  transition: opacity 140ms ease;
+}
+
+.activity--user-message:hover .activity__message-actions,
+.activity--assistant-message:hover .activity__message-actions,
+.activity__message-actions:focus-within { opacity: 1; }
+
+.activity__message-actions > button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-micro);
+  cursor: pointer;
+}
+
+.activity__message-actions > button:hover,
+.activity__message-actions > button:focus-visible { background: var(--surface-hover); color: var(--text); outline: none; }
+.activity__message-actions > time { margin-left: 4px; color: var(--muted); font-size: 10px; }
+.activity__assistant-actions.activity__message-actions { margin-left: -7px; }
 
 .activity__assistant-message .markdown-body > :first-child {
   margin-top: 0;
@@ -3192,6 +3252,35 @@
   font-size: var(--text-label);
 }
 
+.composer__attachment.is-image {
+  position: relative;
+  width: 148px;
+  max-width: 148px;
+  height: 112px;
+  align-items: flex-end;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.composer__attachment.is-image > span {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
+  left: 7px;
+  z-index: 2;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, #000 66%, transparent);
+  color: #fff;
+  font-size: 10px;
+}
+
+.composer__attachment-preview { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; }
+.composer__attachment.is-image .composer__attachment-preview img { width: 100%; height: 100%; border-radius: 0; object-fit: cover; transition: transform 180ms ease; }
+.composer__attachment.is-image:hover .composer__attachment-preview img { transform: scale(1.025); }
+.composer__attachment.is-image > button:last-child { position: absolute; z-index: 3; top: 6px; right: 6px; background: color-mix(in srgb, #000 68%, transparent); color: #fff; }
+
 .composer__attachment > span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3220,6 +3309,21 @@
   background: var(--surface-hover);
   color: var(--text);
 }
+
+.activity__message-images { display: flex; max-width: 520px; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.activity__message-images button { overflow: hidden; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-deep); }
+.activity__message-images img { display: block; width: min(260px, 44vw); max-height: 240px; object-fit: cover; transition: transform 180ms ease; }
+.activity__message-images button:hover img { transform: scale(1.02); }
+
+.image-lightbox { position: fixed; z-index: 1200; inset: 0; display: grid; grid-template-rows: 58px minmax(0, 1fr); background: color-mix(in srgb, #08090b 94%, transparent); backdrop-filter: blur(12px); animation: lightbox-in 150ms ease-out; }
+.image-lightbox > header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid color-mix(in srgb, #fff 12%, transparent); color: #f5f5f5; }
+.image-lightbox > header > span { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.image-lightbox > header > div { display: flex; align-items: center; gap: 5px; }
+.image-lightbox > header button { min-width: 34px; height: 34px; padding: 0 9px; border: 1px solid color-mix(in srgb, #fff 14%, transparent); border-radius: 8px; background: color-mix(in srgb, #fff 7%, transparent); color: #eee; font: inherit; cursor: pointer; }
+.image-lightbox > header button:hover { background: color-mix(in srgb, #fff 14%, transparent); }
+.image-lightbox__stage { min-width: 0; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 28px; scrollbar-color: #555 transparent; }
+.image-lightbox__stage img { display: block; max-width: none; height: auto; object-fit: contain; box-shadow: 0 18px 70px #0009; transition: width 150ms ease; }
+@keyframes lightbox-in { from { opacity: 0; } }
 
 .composer textarea::placeholder {
   color: var(--muted);

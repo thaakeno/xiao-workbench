@@ -719,6 +719,34 @@
 .settings-toggle.is-on span { transform: translateX(14px); }
 .settings-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
+.settings-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.settings-segmented button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.settings-segmented button:hover { color: var(--text); }
+
+.settings-segmented button.is-active {
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
 .settings-search {
   display: flex;
   height: 38px;
