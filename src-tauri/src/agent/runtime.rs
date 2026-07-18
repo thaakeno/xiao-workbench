@@ -147,14 +147,17 @@ impl AgentRuntime {
         }
 
         let previous_generation = self.generation.load(Ordering::Acquire);
-        if previous_generation != 0 {
+        if isolated_storage && previous_generation != 0 {
             if let Some(service) = app.try_state::<RunService>() {
                 service.handle_runtime_stopped(&app, environment_id, previous_generation);
             }
         }
-        let generation = app
-            .state::<XiaoRepository>()
-            .allocate_runtime_generation(environment_id)?;
+        let generation = if isolated_storage {
+            app.state::<XiaoRepository>()
+                .allocate_runtime_generation(environment_id)?
+        } else {
+            next_process_generation(previous_generation)
+        };
         self.generation.store(generation, Ordering::Release);
         fail_pending_requests(&self.pending, "Agent runtime restarted before responding.");
         self.thread_bindings
@@ -567,6 +570,10 @@ impl AgentRuntime {
     }
 }
 
+fn next_process_generation(previous: u64) -> u64 {
+    previous.saturating_add(1).max(1)
+}
+
 #[derive(Default)]
 pub struct EnvironmentRuntimeRegistry {
     runtimes: Mutex<HashMap<String, Arc<AgentRuntime>>>,
@@ -803,6 +810,13 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn desktop_history_generation_does_not_require_a_persisted_environment() {
+        assert_eq!(next_process_generation(0), 1);
+        assert_eq!(next_process_generation(4), 5);
+        assert_eq!(next_process_generation(u64::MAX), u64::MAX);
+    }
 
     #[test]
     fn resolves_pending_result() {
