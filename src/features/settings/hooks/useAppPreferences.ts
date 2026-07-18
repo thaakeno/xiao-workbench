@@ -27,6 +27,7 @@ export type AppPreferences = {
   notifyCompletions: boolean;
   notifyErrors: boolean;
   notifyApprovals: boolean;
+  notifyUsageAlerts: boolean;
   hiddenModels: string[];
   taskRunDefaults: TaskRunDefaults;
 };
@@ -54,6 +55,7 @@ const defaults: AppPreferences = {
   notifyCompletions: true,
   notifyErrors: true,
   notifyApprovals: true,
+  notifyUsageAlerts: true,
   hiddenModels: [],
   taskRunDefaults: defaultTaskRunDefaults,
 };
@@ -113,6 +115,8 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
     notifyErrors: typeof stored.notifyErrors === "boolean" ? stored.notifyErrors : defaults.notifyErrors,
     notifyApprovals:
       typeof stored.notifyApprovals === "boolean" ? stored.notifyApprovals : defaults.notifyApprovals,
+    notifyUsageAlerts:
+      typeof stored.notifyUsageAlerts === "boolean" ? stored.notifyUsageAlerts : defaults.notifyUsageAlerts,
     hiddenModels: Array.isArray(stored.hiddenModels)
       ? stored.hiddenModels.filter((model): model is string => typeof model === "string")
       : [],

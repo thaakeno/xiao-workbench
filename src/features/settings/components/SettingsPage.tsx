@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { XiaoIcon, type XiaoIconName } from "../../../components/icons/XiaoIcon";
+import { isTauriHost } from "../../../core/bridges/tauri";
 import type {
   AgentAccountSummary,
   AgentModelSummary,
@@ -141,11 +142,13 @@ export function SettingsPage({
     const query = modelQuery.trim().toLowerCase();
     return models.filter((model) => !query || `${model.displayName} ${model.model} ${model.description}`.toLowerCase().includes(query));
   }, [modelQuery, models]);
-  const notificationPermission = "Notification" in window ? Notification.permission : "unsupported";
+  const notificationPermission = isTauriHost()
+    ? "Native OS alerts"
+    : "Notification" in window ? Notification.permission : "unsupported";
 
-  const updateNotification = (key: "notifyApprovals" | "notifyCompletions" | "notifyErrors", checked: boolean) => {
+  const updateNotification = (key: "notifyApprovals" | "notifyCompletions" | "notifyErrors" | "notifyUsageAlerts", checked: boolean) => {
     onPreferencesChange({ [key]: checked });
-    if (checked && "Notification" in window && Notification.permission === "default") {
+    if (checked && !isTauriHost() && "Notification" in window && Notification.permission === "default") {
       void Notification.requestPermission();
     }
   };
@@ -249,6 +252,7 @@ export function SettingsPage({
                   <SettingRow title="Task completed" description="Notify when a background or scheduled task finishes."><Toggle label="Task completed notifications" checked={preferences.notifyCompletions} onChange={(checked) => updateNotification("notifyCompletions", checked)} /></SettingRow>
                   <SettingRow title="Input requested" description="Notify when Xiao pauses for permission or a decision."><Toggle label="Input request notifications" checked={preferences.notifyApprovals} onChange={(checked) => updateNotification("notifyApprovals", checked)} /></SettingRow>
                   <SettingRow title="Runtime errors" description="Notify when Codex disconnects or a scheduled task fails."><Toggle label="Runtime error notifications" checked={preferences.notifyErrors} onChange={(checked) => updateNotification("notifyErrors", checked)} /></SettingRow>
+                  <SettingRow title="Usage alerts" description="Notify when a quota is nearly exhausted, refills unexpectedly, or new reset credits arrive."><Toggle label="Usage limit notifications" checked={preferences.notifyUsageAlerts} onChange={(checked) => updateNotification("notifyUsageAlerts", checked)} /></SettingRow>
                 </div>
               </div>
             </section>

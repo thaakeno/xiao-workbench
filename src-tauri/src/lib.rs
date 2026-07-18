@@ -37,7 +37,7 @@ use runs::commands::{
     load_xiao_run_events, resolve_xiao_run_input, retry_xiao_run,
 };
 use runs::service::RunService;
-use system::commands::{check_codex_update, get_system_info, update_codex_cli};
+use system::commands::{check_codex_update, get_system_info, send_desktop_notification, update_codex_cli};
 use terminal::commands::{resize_terminal, start_terminal, stop_terminal, write_terminal};
 use terminal::runtime::TerminalManager;
 use workspace::commands::{get_workspace_snapshot, list_workspace_files, read_workspace_file};
@@ -110,6 +110,7 @@ pub fn run() {
             get_system_info,
             check_codex_update,
             update_codex_cli,
+            send_desktop_notification,
             start_agent_runtime,
             stop_agent_runtime,
             agent_request,

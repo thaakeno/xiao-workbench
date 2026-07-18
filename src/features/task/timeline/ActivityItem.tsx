@@ -191,7 +191,7 @@ export function ActivityItem({
                 onClick={() => onForkTask(entry.id)}
               >
                 <XiaoIcon name="branch" size={12} />
-                Fork
+                Fork from here
               </button>
             ) : null}
             {timeLabel ? <time dateTime={timestamp!.toISOString()} title={timestamp!.toLocaleString()}>{timeLabel}</time> : null}

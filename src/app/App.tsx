@@ -69,6 +69,18 @@ import {
 } from "../features/task/taskPersistence";
 import type { TaskGroup, WorkbenchTask } from "../features/task/task.types";
 import { TaskWorkspace } from "../features/task/workspace/TaskWorkspace";
+
+const notifyDesktop = (title: string, body: string) => {
+  if (isTauriHost()) {
+    void nativeBridge.sendDesktopNotification(title, body).catch((error) => {
+      console.warn("Could not show native notification.", error);
+    });
+    return;
+  }
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification(title, { body });
+  }
+};
 import { useWorkspace } from "../features/workspace/hooks/useWorkspace";
 
 type StoredTaskState = {
@@ -732,6 +744,7 @@ export function App() {
   const notifiedRuntimeErrorRef = useRef<string | null>(null);
   const notifiedApprovalRef = useRef<string | null>(null);
   const notifiedQuestionRef = useRef<string | null>(null);
+  const previousRateLimitsRef = useRef<AgentRateLimits | null>(null);
   const [projects, setProjects] = useState<XiaoProjectSummary[]>(() =>
     applyProjectPreferences(
       readStartupProjects().filter((project) => !isGeneratedCodexWorkspace(project.path)),
@@ -1356,11 +1369,9 @@ export function App() {
         finished &&
         !routineController.routines.some((routine) => routine.taskId === taskId) &&
         taskId !== activeTaskId &&
-        preferences.notifyCompletions &&
-        "Notification" in window &&
-        Notification.permission === "granted"
+        preferences.notifyCompletions
       ) {
-        new Notification("Xiao finished a task", { body: finished.title });
+        notifyDesktop("Xiao finished a task", finished.title);
       }
       setTasks((current) =>
         current.map((task) =>
@@ -1507,12 +1518,10 @@ export function App() {
     }
     if (
       preferences.notifyErrors &&
-      notifiedRuntimeErrorRef.current !== runtimeError &&
-      "Notification" in window &&
-      Notification.permission === "granted"
+      notifiedRuntimeErrorRef.current !== runtimeError
     ) {
       notifiedRuntimeErrorRef.current = runtimeError;
-      new Notification("Xiao needs attention", { body: runtimeError });
+      notifyDesktop("Xiao needs attention", runtimeError);
     }
   }, [agent.runtime.error, preferences.notifyErrors]);
 
@@ -1523,12 +1532,10 @@ export function App() {
     if (!approval) return;
     if (
       preferences.notifyApprovals &&
-      notifiedApprovalRef.current !== approval.id &&
-      "Notification" in window &&
-      Notification.permission === "granted"
+      notifiedApprovalRef.current !== approval.id
     ) {
       notifiedApprovalRef.current = approval.id;
-      new Notification("Xiao is waiting for approval", { body: approval.title });
+      notifyDesktop("Xiao is waiting for approval", approval.title);
     }
   }, [activeTask.timeline, preferences.notifyApprovals]);
 
@@ -1541,14 +1548,46 @@ export function App() {
     const requestId = String(question.requestId);
     if (
       preferences.notifyApprovals &&
-      notifiedQuestionRef.current !== requestId &&
-      "Notification" in window &&
-      Notification.permission === "granted"
+      notifiedQuestionRef.current !== requestId
     ) {
       notifiedQuestionRef.current = requestId;
-      new Notification("Xiao has a question", { body: question.questions[0]?.question });
+      notifyDesktop("Xiao has a question", question.questions[0]?.question ?? "Open Xiao to continue.");
     }
   }, [agent.questionRequest, preferences.notifyApprovals]);
+
+  useEffect(() => {
+    if (!rateLimits || !preferences.notifyUsageAlerts) {
+      previousRateLimitsRef.current = rateLimits;
+      return;
+    }
+    const previous = previousRateLimitsRef.current;
+    previousRateLimitsRef.current = rateLimits;
+    if (!previous) return;
+
+    const windows = [
+      ["Session", previous.primary, rateLimits.primary],
+      ["Weekly", previous.secondary, rateLimits.secondary],
+    ] as const;
+    for (const [label, before, current] of windows) {
+      if (!before || !current) continue;
+      const threshold = before.usedPercent < 90 && current.usedPercent >= 90
+        ? 90
+        : before.usedPercent < 75 && current.usedPercent >= 75
+          ? 75
+          : null;
+      if (threshold) {
+        notifyDesktop(`${label} usage is running low`, `${Math.max(0, 100 - Math.round(current.usedPercent))}% remains.`);
+      } else if (before.usedPercent - current.usedPercent >= 20) {
+        notifyDesktop(`${label} usage reset`, `${Math.max(0, 100 - Math.round(current.usedPercent))}% is available again.`);
+      }
+    }
+
+    const priorCredits = previous.resetCredits?.availableCount ?? 0;
+    const credits = rateLimits.resetCredits?.availableCount ?? 0;
+    if (credits > priorCredits) {
+      notifyDesktop("New Codex reset credit", `${credits - priorCredits} new reset credit${credits - priorCredits === 1 ? "" : "s"} available.`);
+    }
+  }, [preferences.notifyUsageAlerts, rateLimits]);
 
   const changeTaskWorkspaceMode = async (workspaceMode: XiaoWorkspaceMode) => {
     if (workspaceMode === activeTask.workspaceMode) return;

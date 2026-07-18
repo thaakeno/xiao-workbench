@@ -14,9 +14,11 @@ describe("normalizeAppPreferences", () => {
       fastMode: true,
       launchBrand: "wordmark",
       wrapCode: true,
+      terminalPlacement: "right",
       notifyCompletions: false,
       notifyErrors: false,
       notifyApprovals: false,
+      notifyUsageAlerts: true,
       hiddenModels: ["hidden-model"],
       taskRunDefaults: {
         model: "gpt-custom",
@@ -36,9 +38,11 @@ describe("normalizeAppPreferences", () => {
       fastMode: true,
       launchBrand: "wordmark",
       wrapCode: true,
+      terminalPlacement: "right",
       notifyCompletions: false,
       notifyErrors: false,
       notifyApprovals: false,
+      notifyUsageAlerts: true,
       hiddenModels: ["hidden-model"],
       taskRunDefaults: {
         model: "gpt-custom",

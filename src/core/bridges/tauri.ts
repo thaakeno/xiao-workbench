@@ -59,6 +59,10 @@ export const nativeBridge = {
     return invoke<CodexUpdateResult>("update_codex_cli");
   },
 
+  sendDesktopNotification(title: string, body: string) {
+    return invoke<void>("send_desktop_notification", { title, body });
+  },
+
   startAgent(projectPath: string, taskId: string) {
     return invoke<{
       version: string;
