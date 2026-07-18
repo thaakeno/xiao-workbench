@@ -70,6 +70,7 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
   const webActions = actions.filter(({ action, provider }) => !provider && action.kind === "web");
   const otherActions = actions.filter(({ action, provider }) => !provider && action.kind !== "web");
   const thoughts = entries.filter((entry) => entry.kind === "thought" && entry.body?.trim());
+  const commentary = entries.filter((entry) => entry.kind === "result" && entry.messagePhase === "commentary" && entry.body?.trim());
 
   useEffect(() => {
     if (!active) return;
@@ -104,6 +105,7 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
           </details> : null}
           {otherActions.map(actionRow)}
           {thoughts.map((thought) => <div className="exploration-group__thought" key={thought.id}><XiaoIcon name="approach" size={13} /><div><strong>Thought</strong><span>{thought.body}</span></div></div>)}
+          {commentary.map((message) => <div className="exploration-group__commentary markdown-body" key={message.id}>{message.body}</div>)}
         </div>
       </details>
     </article>

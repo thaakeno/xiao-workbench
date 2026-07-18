@@ -136,6 +136,9 @@ const taskChangeSummary = (task: WorkbenchTask, fallback?: ThreadChangeSummary |
   return fallback ?? null;
 };
 
+const isSidebarDraft = (task: WorkbenchTask) =>
+  !task.threadId && !task.timeline.length && !task.draftText.trim() && task.title === "New task";
+
 export function Sidebar({
   activePage,
   projects,
@@ -192,7 +195,12 @@ export function Sidebar({
       !task.archived &&
       (task.origin !== "codex" || !task.sourceCwd || sameProjectPath(task.sourceCwd, activeProjectPath)),
     )
-    .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt),
+    .sort((left, right) =>
+      Number(right.pinned) - Number(left.pinned) ||
+      Number(isSidebarDraft(left)) - Number(isSidebarDraft(right)) ||
+      right.updatedAt - left.updatedAt ||
+      right.createdAt - left.createdAt,
+    ),
   [activeProjectPath, tasks]);
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, WorkbenchTask[]>();

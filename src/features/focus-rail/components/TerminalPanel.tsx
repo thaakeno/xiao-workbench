@@ -14,6 +14,7 @@ type TerminalPanelProps = {
   taskId: string | null;
   system: SystemInfo;
   transitioning: boolean;
+  onClose?: () => void;
 };
 
 type TerminalOutput = { sessionId: string; data: string };
@@ -56,6 +57,7 @@ export function TerminalPanel({
   taskId,
   system,
   transitioning,
+  onClose,
 }: TerminalPanelProps) {
   const [restartKey, setRestartKey] = useState(0);
   const [status, setStatus] = useState<TerminalStatus>("starting");
@@ -226,7 +228,7 @@ export function TerminalPanel({
   return (
     <section className="shell-workspace shell-workspace--pty">
       <header className="shell-workspace__header">
-        <div className="shell-workspace__lights"><i /><i /><i /></div>
+        <XiaoIcon name="terminal" size={15} />
         <div><strong>{workspace.name}</strong><small>{shellName(system.shell)}</small></div>
         <div className="shell-workspace__actions">
           <span className={`shell-workspace__status is-${status}`}><i />{status}</span>
@@ -234,6 +236,7 @@ export function TerminalPanel({
           <button type="button" disabled={transitioning} title="Restart terminal" onClick={() => setRestartKey((key) => key + 1)}>
             <XiaoIcon name="refresh" size={12} />
           </button>
+          {onClose ? <button type="button" title="Close terminal" aria-label="Close terminal" onClick={onClose}><XiaoIcon name="close" size={13} /></button> : null}
         </div>
       </header>
       <div className="shell-workspace__path" title={workspace.execution.executionRoot}>

@@ -73,6 +73,7 @@ type TaskWorkspaceProps = {
   workspace: WorkspaceSnapshot;
   system: SystemInfo;
   bottomTerminalOpen: boolean;
+  onCloseBottomTerminal: () => void;
   onSubmit: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
   onQueueFollowUp: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
   onRemoveFollowUp: (followUpId: string) => void;
@@ -157,6 +158,7 @@ export function TaskWorkspace({
   workspace,
   system,
   bottomTerminalOpen,
+  onCloseBottomTerminal,
   onSubmit,
   onQueueFollowUp,
   onRemoveFollowUp,
@@ -345,7 +347,7 @@ export function TaskWorkspace({
   if (launchMode) {
     const branch = workspace.git?.branch ?? "No Git branch";
     return (
-      <section className="task-workspace task-workspace--launch">
+      <section className={`task-workspace task-workspace--launch${bottomTerminalOpen ? " has-bottom-terminal" : ""}`}>
         <div className="task-launch">
           <div className="task-launch__inner">
             <div className="task-launch__brand" aria-label="XIAO">
@@ -372,6 +374,7 @@ export function TaskWorkspace({
             </div>
           </div>
         </div>
+        {bottomTerminalOpen ? <div className="task-workspace__bottom-terminal"><TerminalPanel active workspace={workspace} taskId={executionTaskId} system={system} transitioning={environmentBusy} onClose={onCloseBottomTerminal} /></div> : null}
       </section>
     );
   }
@@ -437,6 +440,7 @@ export function TaskWorkspace({
             taskId={executionTaskId}
             system={system}
             transitioning={environmentBusy}
+            onClose={onCloseBottomTerminal}
           />
         </div>
       ) : null}

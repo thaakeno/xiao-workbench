@@ -13,6 +13,14 @@
   overflow-y: auto;
 }
 
+.task-workspace--launch.has-bottom-terminal {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(180px, 30vh);
+  overflow: hidden;
+}
+
+.task-workspace--launch.has-bottom-terminal .task-launch { overflow-y: auto; }
+
 .task-launch {
   display: grid;
   width: 100%;
@@ -502,14 +510,18 @@
   pointer-events: auto;
   transform: translateY(-50%);
 }
-.message-navigator__track { display: flex; width: 16px; height: 100%; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; padding: 4px 0; scrollbar-width: none; overscroll-behavior: contain; }
+.message-navigator__track { display: flex; width: 16px; height: 100%; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; padding: 14px 0; scrollbar-width: none; overscroll-behavior: contain; mask-image: linear-gradient(to bottom, transparent, #000 18px, #000 calc(100% - 18px), transparent); }
 .message-navigator__track::-webkit-scrollbar { display: none; }
 .message-navigator button { position: relative; min-height: 5px; height: 7px; flex: 0 0 7px; pointer-events: auto; }
-.message-navigator button > i { position: absolute; top: 50%; right: 0; width: 5px; height: 2px; border-radius: 99px; background: var(--muted); opacity: .48; transform: translateY(-50%); transition: width 150ms ease, height 150ms ease, opacity 150ms ease, background 150ms ease; }
+.message-navigator button > i { position: absolute; top: 50%; right: 0; width: 5px; height: 2px; border-radius: 99px; background: var(--muted); opacity: .48; transform: translateY(-50%); transition: width 130ms ease, height 130ms ease, opacity 130ms ease, background 130ms ease; will-change: width,opacity; }
 .message-navigator button:hover > i,
 .message-navigator button:focus-visible > i { width: 13px; height: 3px; background: var(--accent); opacity: 1; }
-.message-navigator button[data-distance="1"] > i { width: 10px; opacity: .78; }
-.message-navigator button[data-distance="2"] > i { width: 7px; opacity: .62; }
+.message-navigator button:has(+ button:hover) > i,
+.message-navigator button:has(+ button:focus-visible) > i,
+.message-navigator button:hover + button > i,
+.message-navigator button:focus-visible + button > i { width: 9px; opacity: .74; }
+.message-navigator button:has(+ button + button:hover) > i,
+.message-navigator button:hover + button + button > i { width: 7px; opacity: .6; }
 .message-navigator__preview { position: absolute; right: 24px; display: grid; width: 330px; gap: 6px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-raised); box-shadow: 0 16px 44px rgb(0 0 0 / 28%); pointer-events: none; transform: translateY(-50%); animation: navigator-preview-in 130ms ease-out both; }
 @keyframes navigator-preview-in { from { opacity: 0; transform: translate(8px, -50%) scale(.98); } }
 .message-navigator strong,
@@ -949,6 +961,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.exploration-group__commentary { padding: 8px 9px 10px 27px; color: var(--text-soft); font-size: 13px; line-height: 1.6; }
+.exploration-group__commentary + .exploration-group__commentary { border-top: 1px solid var(--line); }
 
 .exploration-group__item a {
   min-width: 0;

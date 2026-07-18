@@ -271,6 +271,7 @@ export const timelineEntryFromItem = (
       title: "Agent response",
       createdAt,
       body: item.text,
+      messagePhase: item.phase === "commentary" ? "commentary" : "final_answer",
       meta: "Xiao",
       status: "success",
     };

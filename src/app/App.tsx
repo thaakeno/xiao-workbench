@@ -779,7 +779,7 @@ export function App() {
   const persistedWorkspaceSnapshotsRef = useRef(new Map<string, PersistedWorkspaceSnapshot>());
   const latestTaskStateRef = useRef<{ path: string; state: StoredTaskState } | null>(null);
   const nativeWorkspaceLoadedRef = useRef(new Set<string>());
-  const openProjectWithoutTaskRef = useRef(false);
+  const openProjectWithoutTaskRef = useRef(true);
   const pendingCodexThreadRef = useRef<string | null>(null);
   const loadingCodexThreadsRef = useRef(new Set<string>());
   const focusedLaunchTaskRef = useRef<string | null>(null);
@@ -1193,8 +1193,8 @@ export function App() {
           }));
           return;
         }
-        if (method?.startsWith("item/") || method === "turn/plan/updated" || method === "turn/diff/updated") {
-          refreshTimeline(method === "item/completed" ? 30 : 120);
+        if (method === "item/completed") {
+          refreshTimeline(180);
         }
       });
       if (disposed) {
@@ -2655,13 +2655,14 @@ export function App() {
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
         event.preventDefault();
-        openFocusView("terminal");
+        if (focusPanelOpen && focusView === "terminal") setFocusPanelOpen(false);
+        else openFocusView("terminal");
       }
       if (event.key === "Escape") setCommandMenuOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePage, activeTaskId, draftTask.id, draftTabOpen, openTaskIds]);
+  }, [activePage, activeTaskId, draftTask.id, draftTabOpen, focusPanelOpen, focusView, openTaskIds]);
 
   const selectedThreadId = activeTask.threadBinding?.threadId ?? activeTask.threadId ?? null;
   const savedThreadUsage = selectedThreadId
@@ -2888,6 +2889,7 @@ export function App() {
               workspace={workspace}
               system={system}
               bottomTerminalOpen={focusPanelOpen && focusView === "terminal" && preferences.terminalPlacement === "bottom"}
+              onCloseBottomTerminal={() => setFocusPanelOpen(false)}
               onModelChange={(model) => {
                 patchActiveTask({ model, reasoningEffort: null });
                 updateTaskRunDefaults({ model, reasoningEffort: null });

@@ -53,6 +53,7 @@ export type TimelineEntry = {
   createdAt?: number;
   durationMs?: number;
   body?: string;
+  messagePhase?: "commentary" | "final_answer";
   meta?: string;
   status?: "idle" | "active" | "success" | "warning" | "error";
   command?: string;

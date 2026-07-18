@@ -40,6 +40,10 @@ pub async fn send_desktop_notification(
             let mut notification = notify_rust::Notification::new();
             notification.summary(&title).body(&body);
             notification.app_id(&app_id);
+            let icon = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("icons")
+                .join("app-icon.png");
+            notification.icon(&icon.to_string_lossy());
             notification.show().map(|_| ()).map_err(|error| error.to_string())
         })
         .await

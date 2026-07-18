@@ -93,7 +93,10 @@ export const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
     let end = index + 1;
     while (end < timeline.length && timeline[end].kind !== "user" && timeline[end].kind !== "brief") end += 1;
     const segment = timeline.slice(index, end);
-    const executionEntries = segment.filter((item) => item.kind === "explore" || item.kind === "command" || item.kind === "thought");
+    const executionEntries = segment.filter((item) =>
+      item.kind === "explore" || item.kind === "command" || item.kind === "thought" ||
+      (item.kind === "result" && item.messagePhase === "commentary"),
+    );
     if (executionEntries.length) rows.push({ kind: "exploration", entries: executionEntries, index: index + 1 });
     segment.slice(1).forEach((item, offset) => {
       if (!executionEntries.includes(item)) rows.push({ kind: "entry", entry: item, index: index + offset + 1 });

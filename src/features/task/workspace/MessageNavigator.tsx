@@ -42,14 +42,13 @@ export function MessageNavigator({ timeline, onJump }: { timeline: TimelineEntry
   return <nav ref={hostRef} className="message-navigator" aria-label="Jump to a message" onMouseLeave={() => setHovered(null)}>
     <div className="message-navigator__track">
       {stops.map((stop, index) => {
-        const distance = hovered == null ? 9 : Math.min(9, Math.abs(index - hovered));
         const activate = (node: HTMLButtonElement) => {
           const host = hostRef.current?.getBoundingClientRect();
           const mark = node.getBoundingClientRect();
           setHovered(index);
           if (host) setTooltipTop(Math.max(72, Math.min(host.height - 72, mark.top + mark.height / 2 - host.top)));
         };
-        return <button type="button" key={stop.id} data-distance={distance} aria-label={`Jump to message ${index + 1}`} onMouseEnter={(event) => activate(event.currentTarget)} onFocus={(event) => activate(event.currentTarget)} onBlur={() => setHovered(null)} onClick={() => onJump(stop.id)}><i /></button>;
+        return <button type="button" key={stop.id} aria-label={`Jump to message ${index + 1}`} onMouseEnter={(event) => activate(event.currentTarget)} onFocus={(event) => activate(event.currentTarget)} onBlur={() => setHovered(null)} onClick={() => onJump(stop.id)}><i /></button>;
       })}
     </div>
     {active ? <aside className="message-navigator__preview" style={{ top: tooltipTop }}>

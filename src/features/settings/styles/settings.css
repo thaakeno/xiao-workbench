@@ -640,10 +640,11 @@
 
 .theme-option { grid-template-rows: 92px auto; }
 .theme-option__preview { height: 92px; }
-.theme-option--system .theme-option__preview { background: linear-gradient(120deg, #fff 0 49.5%, #232322 50%); }
-.theme-option--system .theme-preview__rail { background: linear-gradient(90deg, #f2f2f0 0 49%, #1f1f1e 50%); }
-.theme-option--system .theme-preview__line { background: #64645f; }
-.theme-option--system .theme-preview__accent { background: #7652d8; }
+.theme-option--system .theme-option__preview { border-color: color-mix(in srgb, var(--line-strong) 78%, transparent); background: linear-gradient(90deg, #f8f8f6 0 50%, #20201f 50%); }
+.theme-option--system .theme-preview__rail { background: #e8e8e5; }
+.theme-option--system .theme-preview__header { background: linear-gradient(90deg, #eeeeeb 0 30%, #292928 30%); }
+.theme-option--system .theme-preview__line { background: #777771; }
+.theme-option--system .theme-preview__accent { background: #6aaee8; }
 
 .settings-list {
   overflow: hidden;
