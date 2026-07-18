@@ -901,11 +901,39 @@ export function App() {
     ])
       .then(([threads, usage, limits]) => {
         if (cancelled) return;
+        codexHistoryRefreshRef.current = Date.now();
         setCodexThreads(threads);
         setThreadTokenUsage(usage);
         setRateLimits(limits ? readRateLimits(limits) : null);
         writeSnapshot(codexThreadSnapshotStorageKey, threads);
         writeSnapshot(usageSnapshotStorageKey, usage);
+        const threadCounts = new Map<string, { path: string; count: number; updatedAt: number }>();
+        for (const thread of threads) {
+          if (thread.archived || !thread.cwd.trim()) continue;
+          const key = projectPathKey(thread.cwd);
+          const current = threadCounts.get(key);
+          threadCounts.set(key, {
+            path: thread.cwd,
+            count: (current?.count ?? 0) + 1,
+            updatedAt: Math.max(current?.updatedAt ?? 0, thread.updatedAt),
+          });
+        }
+        const historyProjects = [...threadCounts.values()]
+          .filter(({ count }) => count >= 2)
+          .map(({ path, count, updatedAt }): XiaoProjectSummary => ({
+            path,
+            name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
+            updatedAt,
+            taskCount: count,
+          }));
+        setProjects((current) => {
+          const next = applyProjectPreferences(
+            historyProjects.reduce((merged, project) => mergeProject(merged, project), current),
+            projectPreferencesRef.current,
+          );
+          writeStartupProjects(next);
+          return next;
+        });
       })
       .catch((reason) => {
         if (!cancelled) console.error("Could not load local Codex history.", reason);
@@ -1300,61 +1328,6 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!preferences.importCodexHistory) {
-      setTasks((current) => current.filter((task) => task.origin !== "codex"));
-      setActiveTaskId((current) => current?.startsWith("codex:") ? null : current);
-    }
-    if (!isTauriHost() || agent.runtime.phase !== "ready") return;
-    const now = Date.now();
-    if (now - codexHistoryRefreshRef.current < 30_000) return;
-    codexHistoryRefreshRef.current = now;
-    let cancelled = false;
-
-    void Promise.all([listCodexThreads(), nativeBridge.readAgentThreadUsage()])
-      .then(([threads, usage]) => {
-        if (cancelled) return;
-        setCodexThreads(threads);
-        setThreadTokenUsage(usage);
-        writeSnapshot(codexThreadSnapshotStorageKey, threads);
-        writeSnapshot(usageSnapshotStorageKey, usage);
-        const threadCounts = new Map<string, { path: string; count: number; updatedAt: number }>();
-        for (const thread of threads) {
-          if (thread.archived || !thread.cwd.trim()) continue;
-          const key = projectPathKey(thread.cwd);
-          const current = threadCounts.get(key);
-          threadCounts.set(key, {
-            path: thread.cwd,
-            count: (current?.count ?? 0) + 1,
-            updatedAt: Math.max(current?.updatedAt ?? 0, thread.updatedAt),
-          });
-        }
-        const historyProjects: XiaoProjectSummary[] = [...threadCounts.values()]
-          .filter(({ count }) => count >= 2)
-          .map(({ path, count, updatedAt }) => ({
-            path,
-            name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
-            updatedAt,
-            taskCount: count,
-          }));
-        setProjects((current) => {
-          const next = applyProjectPreferences(
-            historyProjects.reduce((merged, project) => mergeProject(merged, project), current),
-            projectPreferencesRef.current,
-          );
-          writeStartupProjects(next);
-          return next;
-        });
-      })
-      .catch((reason) => {
-        if (!cancelled) console.error("Could not load Codex thread history.", reason);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agent.runtime.phase, preferences.importCodexHistory]);
-
-  useEffect(() => {
     if (
       !preferences.importCodexHistory ||
       !taskStateReady ||
@@ -1398,7 +1371,6 @@ export function App() {
 
   useEffect(() => {
     if (
-      agent.runtime.phase !== "ready" ||
       activeTask.origin !== "codex" ||
       activeTask.historyLoaded ||
       !activeTask.threadId ||
@@ -1442,7 +1414,7 @@ export function App() {
         ));
       })
       .finally(() => loadingCodexThreadsRef.current.delete(threadId));
-  }, [activeTask.historyLoaded, activeTask.id, activeTask.origin, activeTask.threadId, agent.runtime.phase]);
+  }, [activeTask.historyLoaded, activeTask.id, activeTask.origin, activeTask.threadId]);
 
   const loadOlderCodexHistory = useCallback(async () => {
     if (
