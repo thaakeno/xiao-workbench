@@ -40,7 +40,9 @@ $installer = Get-ChildItem -LiteralPath (Join-Path $root 'src-tauri\target\relea
     Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if (-not $installer) { throw 'The NSIS installer was not produced.' }
 $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-$commits = git log --pretty=format:'- %s (`%h`)' --no-merges "$(git describe --tags --abbrev=0 2>$null)..HEAD"
+$previousTag = @(git tag --sort=-creatordate | Select-Object -First 1)
+$commitRange = if ($previousTag) { "$($previousTag[0])..HEAD" } else { 'HEAD' }
+$commits = git log --pretty=format:'- %s (`%h`)' --no-merges $commitRange
 if (-not $commits) { $commits = git log -20 --pretty=format:'- %s (`%h`)' --no-merges }
 $notes = @"
 ## Xiao Workbench $Tag
