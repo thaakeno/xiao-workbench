@@ -1435,6 +1435,7 @@ export function useAgentRuntime(
             const activeGeneration = activeGenerationRef.current;
             if (
               !disposed &&
+              autoConnect &&
               (!activeEnvironmentId || event.payload.environmentId === activeEnvironmentId) &&
               (activeGeneration == null || event.payload.generation === activeGeneration) &&
               (event.payload.message.id === 0 || compactingTasks.current.size > 0)
@@ -1516,7 +1517,7 @@ export function useAgentRuntime(
       setListenersReady(false);
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [appendRuntimeLog, handleMessage, publishRunProjection, workspacePath]);
+  }, [appendRuntimeLog, autoConnect, handleMessage, publishRunProjection, workspacePath]);
 
   useEffect(() => {
     if (!isTauriHost() || !listenersReady) return;
@@ -1547,7 +1548,7 @@ export function useAgentRuntime(
   }, [listenersReady, publishRunProjection, workspacePath]);
 
   useEffect(() => {
-    if (!isTauriHost() || !listenersReady || !activeTaskTimelineComplete) return;
+    if (!isTauriHost() || !autoConnect || !listenersReady || !activeTaskTimelineComplete) return;
     let cancelled = false;
     replayedPendingInputs.current.clear();
     const restore = async () => {
@@ -1665,12 +1666,19 @@ export function useAgentRuntime(
   }, [
     activeTaskId,
     activeTaskTimelineComplete,
+    autoConnect,
     handleMessage,
     listenersReady,
     publishRunProjection,
     updateTimeline,
     workspacePath,
   ]);
+
+  useEffect(() => {
+    if (autoConnect) return;
+    reconnectAttempt.current = 0;
+    setRuntime((current) => current.error ? { ...current, error: null } : current);
+  }, [autoConnect]);
 
   const connect = useCallback(async () => {
     if (!isTauriHost()) {
