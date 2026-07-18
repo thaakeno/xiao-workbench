@@ -1938,6 +1938,7 @@ export function App() {
 
   const selectProject = (path: string) => {
     const cached = readStartupTaskState(path);
+    nativeWorkspaceLoadedRef.current.delete(path);
     openProjectWithoutTaskRef.current = true;
     setTasks(cached?.tasks ?? []);
     setActiveTaskId(null);
