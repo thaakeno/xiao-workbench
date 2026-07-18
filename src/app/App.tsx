@@ -179,6 +179,15 @@ const readRateLimits = (response: Record<string, unknown>): AgentRateLimits | nu
   };
 };
 
+type RuntimeMessageEnvelope = {
+  environmentId: string;
+  generation: number;
+  message: {
+    method?: string;
+    params?: Record<string, unknown>;
+  };
+};
+
 const readActiveProjectPath = () => {
   try { return window.localStorage.getItem(activeProjectStorageKey) || undefined; }
   catch { return undefined; }
@@ -813,7 +822,6 @@ export function App() {
   >(() => readSnapshot(changeSummarySnapshotStorageKey, {}));
   const codexHistoryRefreshRef = useRef(0);
   const codexThreadUpdatedAtRef = useRef(new Map<string, number>());
-  const externalCodexRunningUntilRef = useRef(new Map<string, number>());
   const [externalCodexRunningIds, setExternalCodexRunningIds] = useState<string[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<ArchivedTaskItem[]>([]);
   const [archivedTasksLoading, setArchivedTasksLoading] = useState(false);
@@ -1064,12 +1072,10 @@ export function App() {
             recent.forEach((thread) => next.set(thread.id, thread));
             return [...next.values()].sort((left, right) => right.updatedAt - left.updatedAt);
           });
+          setExternalCodexRunningIds(recent
+            .filter((thread) => thread.status === "active")
+            .map((thread) => `codex:${thread.id}`));
         }
-        const now = Date.now();
-        changed.forEach((thread) => externalCodexRunningUntilRef.current.set(`codex:${thread.id}`, now + 6_000));
-        setExternalCodexRunningIds([...externalCodexRunningUntilRef.current.entries()]
-          .filter(([, until]) => until > now)
-          .map(([id]) => id));
 
         if (activeTask.origin === "codex" && activeTask.threadId && changed.some((thread) => thread.id === activeTask.threadId)) {
           const page = await refreshCodexThreadTimeline(activeTask.threadId);
@@ -1094,6 +1100,126 @@ export function App() {
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeTask.id, activeTask.origin, activeTask.threadId, preferences.importCodexHistory]);
+
+  useEffect(() => {
+    if (
+      !preferences.importCodexHistory ||
+      !isTauriHost() ||
+      activeTask.origin !== "codex" ||
+      !activeTask.threadId
+    ) return;
+    const taskId = activeTask.id;
+    const threadId = activeTask.threadId;
+    let disposed = false;
+    let subscribed = false;
+    let refreshTimer: number | undefined;
+    let unlisten: (() => void) | undefined;
+
+    const refreshTimeline = (delay = 80) => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        void refreshCodexThreadTimeline(threadId).then((page) => {
+          if (disposed) return;
+          setTasks((current) => current.map((task) => task.id === taskId ? {
+            ...task,
+            timeline: page.timeline,
+            timelineLoaded: true,
+            timelineComplete: page.nextCursor === null,
+            timelineEntryCount: page.timeline.length,
+            historyCursor: page.nextCursor,
+          } : task));
+        }).catch(() => undefined);
+      }, delay);
+    };
+
+    const updateStatus = (status: CodexThreadSummary["status"]) => {
+      setCodexThreads((current) => current.map((thread) =>
+        thread.id === threadId ? { ...thread, status } : thread,
+      ));
+      setExternalCodexRunningIds((current) => {
+        const id = `codex:${threadId}`;
+        return status === "active"
+          ? current.includes(id) ? current : [...current, id]
+          : current.filter((value) => value !== id);
+      });
+    };
+
+    void (async () => {
+      unlisten = await listen<RuntimeMessageEnvelope>("agent://runtime-message", (event) => {
+        if (disposed || event.payload.environmentId !== "codex-desktop-history") return;
+        const { method, params = {} } = event.payload.message;
+        if (params.threadId !== threadId) return;
+
+        if (method === "thread/status/changed") {
+          const rawStatus = params.status;
+          const type = rawStatus && typeof rawStatus === "object"
+            ? (rawStatus as Record<string, unknown>).type
+            : null;
+          if (type === "active" || type === "idle" || type === "systemError" || type === "notLoaded") {
+            updateStatus(type);
+          }
+          return;
+        }
+        if (method === "turn/started") updateStatus("active");
+        if (method === "turn/completed") {
+          updateStatus("idle");
+          refreshTimeline(0);
+          return;
+        }
+        if (method === "item/agentMessage/delta" && typeof params.delta === "string") {
+          const itemId = typeof params.itemId === "string" ? params.itemId : null;
+          if (!itemId) return;
+          const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
+          setTasks((current) => current.map((task) => {
+            if (task.id !== taskId || !task.timelineLoaded) return task;
+            const existing = task.timeline.find((entry) => entry.id === itemId);
+            const timeline = existing
+              ? task.timeline.map((entry) => entry.id === itemId
+                ? { ...entry, body: `${entry.body ?? ""}${params.delta}`, status: "active" as const }
+                : entry)
+              : [...task.timeline, {
+                id: itemId,
+                kind: "result" as const,
+                title: "Agent response",
+                body: params.delta as string,
+                createdAt: Date.now(),
+                meta: "Streaming",
+                status: "active" as const,
+                turnId,
+              }];
+            return { ...task, timeline, timelineEntryCount: timeline.length };
+          }));
+          return;
+        }
+        if (method?.startsWith("item/") || method === "turn/plan/updated" || method === "turn/diff/updated") {
+          refreshTimeline(method === "item/completed" ? 30 : 120);
+        }
+      });
+      if (disposed) {
+        unlisten();
+        return;
+      }
+      const response = await nativeBridge.subscribeCodexThread(threadId);
+      subscribed = true;
+      const thread = response.thread;
+      if (thread && typeof thread === "object") {
+        const rawStatus = (thread as Record<string, unknown>).status;
+        const type = rawStatus && typeof rawStatus === "object"
+          ? (rawStatus as Record<string, unknown>).type
+          : null;
+        if (type === "active" || type === "idle" || type === "systemError" || type === "notLoaded") {
+          updateStatus(type);
+        }
+      }
+    })().catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (subscribed) void nativeBridge.unsubscribeCodexThread(threadId).catch(() => undefined);
     };
   }, [activeTask.id, activeTask.origin, activeTask.threadId, preferences.importCodexHistory]);
 

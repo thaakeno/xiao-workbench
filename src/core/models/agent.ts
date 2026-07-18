@@ -233,6 +233,7 @@ export type CodexThreadSummary = {
   createdAt: number;
   updatedAt: number;
   archived: boolean;
+  status: "notLoaded" | "idle" | "systemError" | "active";
 };
 
 export type ThreadChangeSummary = {

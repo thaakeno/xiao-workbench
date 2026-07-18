@@ -15,6 +15,13 @@ type RawThread = {
   createdAt?: unknown;
   updatedAt?: unknown;
   recencyAt?: unknown;
+  status?: unknown;
+};
+
+const threadStatus = (value: unknown): CodexThreadSummary["status"] => {
+  if (!value || typeof value !== "object") return "notLoaded";
+  const type = (value as Record<string, unknown>).type;
+  return type === "idle" || type === "systemError" || type === "active" ? type : "notLoaded";
 };
 
 const cleanTitle = (name: unknown, preview: unknown) => {
@@ -42,6 +49,7 @@ const threadSummary = (thread: RawThread, archived: boolean): CodexThreadSummary
     createdAt,
     updatedAt: updatedSeconds * 1_000,
     archived,
+    status: threadStatus(thread.status),
   };
 };
 

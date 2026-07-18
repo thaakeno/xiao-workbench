@@ -298,6 +298,41 @@ pub async fn read_codex_thread_turns(
 }
 
 #[tauri::command]
+pub async fn subscribe_codex_thread(
+    app: AppHandle,
+    thread_id: String,
+    runtimes: State<'_, EnvironmentRuntimeRegistry>,
+) -> Result<Value, String> {
+    validate_history_identifier(&thread_id)?;
+    runtimes.start_desktop_history(app, DESKTOP_HISTORY_ENVIRONMENT_ID)?;
+    runtimes
+        .request(
+            DESKTOP_HISTORY_ENVIRONMENT_ID,
+            "thread/resume".to_owned(),
+            json!({ "threadId": thread_id, "excludeTurns": true }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn unsubscribe_codex_thread(
+    app: AppHandle,
+    thread_id: String,
+    runtimes: State<'_, EnvironmentRuntimeRegistry>,
+) -> Result<(), String> {
+    validate_history_identifier(&thread_id)?;
+    runtimes.start_desktop_history(app, DESKTOP_HISTORY_ENVIRONMENT_ID)?;
+    runtimes
+        .request(
+            DESKTOP_HISTORY_ENVIRONMENT_ID,
+            "thread/unsubscribe".to_owned(),
+            json!({ "threadId": thread_id }),
+        )
+        .await
+        .map(|_| ())
+}
+
+#[tauri::command]
 pub async fn read_codex_rate_limits(
     app: AppHandle,
     runtimes: State<'_, EnvironmentRuntimeRegistry>,

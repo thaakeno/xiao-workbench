@@ -349,6 +349,14 @@ export const nativeBridge = {
     return invoke<XiaoProjectSummary[]>("list_xiao_projects");
   },
 
+  subscribeCodexThread(threadId: string) {
+    return invoke<Record<string, unknown>>("subscribe_codex_thread", { threadId });
+  },
+
+  unsubscribeCodexThread(threadId: string) {
+    return invoke<void>("unsubscribe_codex_thread", { threadId });
+  },
+
   readXiaoContributionSummary() {
     return invoke<XiaoContributionSummary>("read_xiao_contribution_summary");
   },
