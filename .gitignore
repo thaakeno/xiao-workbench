@@ -11,6 +11,9 @@ src-tauri/gen/
 /Show
 *.md
 !README.md
+!CONTRIBUTING.md
+/docs/
+/plans/
 
 # Local credentials and signing material
 .env

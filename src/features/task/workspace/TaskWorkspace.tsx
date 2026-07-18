@@ -16,7 +16,9 @@ import {
   type ThreadTokenUsage,
   type TimelineEntry,
 } from "../../../core/models/agent";
+import type { RunSnapshot } from "../../../core/models/run";
 import type { WorkspaceSnapshot } from "../../../core/models/workspace";
+import type { XiaoWorkspaceMode } from "../../../core/models/xiao";
 import type { FocusView } from "../../focus-rail/focus-rail.types";
 import { Composer } from "../composer/Composer";
 import { TaskTimeline } from "../timeline/TaskTimeline";
@@ -26,18 +28,25 @@ import "../styles/task.css";
 
 type TaskWorkspaceProps = {
   taskId: string;
+  executionTaskId: string | null;
   taskTitle: string;
   taskArchived: boolean;
   launchMode: boolean;
   taskStateError: string | null;
+  taskStateLoading: boolean;
   timeline: TimelineEntry[];
   runtime: AgentRuntimeState;
+  latestRun: RunSnapshot | null;
   models: AgentModelSummary[];
   selectedModel: string | null;
   selectedReasoningEffort: string | null;
+  fastMode: boolean;
   mode: AgentMode;
   approvalPolicy: AgentApprovalPolicy;
   sandboxMode: AgentSandboxMode;
+  workspaceMode: XiaoWorkspaceMode;
+  environmentBusy: boolean;
+  environmentError: string | null;
   goal: AgentGoal | null;
   plan: AgentPlan | null;
   reviewContext: AgentAttachment[];
@@ -58,6 +67,7 @@ type TaskWorkspaceProps = {
   showChatExport: boolean;
   historyHasMore: boolean;
   historyLoadingOlder: boolean;
+  launchBrand: "logo" | "wordmark";
   workspace: WorkspaceSnapshot;
   onSubmit: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
   onQueueFollowUp: (prompt: string, attachments: AgentAttachment[]) => Promise<boolean>;
@@ -67,6 +77,7 @@ type TaskWorkspaceProps = {
   onRestoredAttachmentsConsumed: () => void;
   onCompact: () => Promise<boolean>;
   onUndo: () => void;
+  onForkTask: (entryId: string) => void;
   onRemoveReviewContext: (attachmentId: string) => void;
   onReviewContextSent: () => void;
   onDraftChange: (draftText: string) => void;
@@ -76,12 +87,15 @@ type TaskWorkspaceProps = {
   ) => Promise<boolean>;
   onModelChange: (model: string | null) => void;
   onReasoningEffortChange: (effort: string | null) => void;
+  onFastModeChange: (fastMode: boolean) => void;
   onModeChange: (mode: AgentMode) => void;
   onApprovalPolicyChange: (policy: AgentApprovalPolicy) => void;
   onSandboxModeChange: (mode: AgentSandboxMode) => void;
+  onWorkspaceModeChange: (mode: XiaoWorkspaceMode) => Promise<void>;
   onGoalSet: (objective: string, status?: AgentGoal["status"]) => Promise<boolean>;
   onGoalClear: () => Promise<boolean>;
   onInterrupt: () => Promise<void>;
+  onRetryRun: (runId: string) => void;
   onResolveApproval: (
     taskId: string,
     entryId: string,
@@ -95,18 +109,25 @@ type TaskWorkspaceProps = {
 
 export function TaskWorkspace({
   taskId,
+  executionTaskId,
   taskTitle,
   taskArchived,
   launchMode,
   taskStateError,
+  taskStateLoading,
   timeline,
   runtime,
+  latestRun,
   models,
   selectedModel,
   selectedReasoningEffort,
+  fastMode,
   mode,
   approvalPolicy,
   sandboxMode,
+  workspaceMode,
+  environmentBusy,
+  environmentError,
   goal,
   plan,
   reviewContext,
@@ -127,6 +148,7 @@ export function TaskWorkspace({
   showChatExport,
   historyHasMore,
   historyLoadingOlder,
+  launchBrand,
   workspace,
   onSubmit,
   onQueueFollowUp,
@@ -136,18 +158,22 @@ export function TaskWorkspace({
   onRestoredAttachmentsConsumed,
   onCompact,
   onUndo,
+  onForkTask,
   onRemoveReviewContext,
   onReviewContextSent,
   onDraftChange,
   onResolveQuestion,
   onModelChange,
   onReasoningEffortChange,
+  onFastModeChange,
   onModeChange,
   onApprovalPolicyChange,
   onSandboxModeChange,
+  onWorkspaceModeChange,
   onGoalSet,
   onGoalClear,
   onInterrupt,
+  onRetryRun,
   onResolveApproval,
   onFocusView,
   onToggleArchived,
@@ -158,6 +184,15 @@ export function TaskWorkspace({
   const followLiveOutput = useRef(true);
   const previousWorking = useRef(false);
   const taskWorking = runtime.phase === "working" && runtime.taskId === taskId;
+  const canFork =
+    runtime.phase === "ready" &&
+    !taskArchived &&
+    !taskStateError &&
+    !taskStateLoading &&
+    !environmentBusy &&
+    !compacting &&
+    !undoing &&
+    followUps.length === 0;
   const activeModel =
     (selectedModel ? models.find((model) => model.model === selectedModel) : models.find((model) => model.isDefault)) ??
     models.find((model) => model.isDefault);
@@ -189,14 +224,22 @@ export function TaskWorkspace({
     <Composer
       key={taskId}
       taskId={taskId}
+      executionTaskId={executionTaskId}
       workspacePath={workspace.path}
       runtime={runtime}
       models={models}
       selectedModel={selectedModel}
       selectedReasoningEffort={selectedReasoningEffort}
+      fastMode={fastMode}
       mode={mode}
       approvalPolicy={approvalPolicy}
       sandboxMode={sandboxMode}
+      workspaceMode={workspaceMode}
+      isolationAvailable={workspace.execution.isolationAvailable}
+      isolationUnavailableReason={workspace.execution.isolationUnavailableReason}
+      environmentBusy={environmentBusy}
+      environmentError={environmentError}
+      managedWorktree={workspace.execution.managedWorktree}
       goal={goal}
       plan={plan}
       changeSummary={{
@@ -219,9 +262,11 @@ export function TaskWorkspace({
       autoFocus={launchMode}
       onModelChange={onModelChange}
       onReasoningEffortChange={onReasoningEffortChange}
+      onFastModeChange={onFastModeChange}
       onModeChange={onModeChange}
       onApprovalPolicyChange={onApprovalPolicyChange}
       onSandboxModeChange={onSandboxModeChange}
+      onWorkspaceModeChange={onWorkspaceModeChange}
       onGoalSet={onGoalSet}
       onGoalClear={onGoalClear}
       onInterrupt={onInterrupt}
@@ -238,7 +283,10 @@ export function TaskWorkspace({
       onReviewContextSent={onReviewContextSent}
       onDraftChange={onDraftChange}
       onResolveQuestion={onResolveQuestion}
-      disabled={taskArchived || Boolean(taskStateError)}
+      disabled={
+        taskArchived || taskStateLoading || environmentBusy || Boolean(taskStateError)
+      }
+      disabledPlaceholder={taskStateLoading ? "Loading task history…" : undefined}
       storageError={taskStateError}
     />
   );
@@ -250,9 +298,13 @@ export function TaskWorkspace({
         <div className="task-launch">
           <div className="task-launch__inner">
             <div className="task-launch__brand" aria-label="XIAO">
-              <span className="task-launch__wordmark" aria-hidden="true">
-                <i>X</i><i>I</i><i>A</i><i className="task-launch__orbit">O</i>
-              </span>
+              {launchBrand === "logo" ? (
+                <img className="task-launch__logo" src="/xiao-mark.png" alt="" aria-hidden="true" />
+              ) : (
+                <span className="task-launch__wordmark" aria-hidden="true">
+                  <i>X</i><i>I</i><i>A</i><i className="task-launch__orbit">O</i>
+                </span>
+              )}
               <small>Local agent workspace</small>
             </div>
             {composer}
@@ -281,13 +333,15 @@ export function TaskWorkspace({
         taskArchived={taskArchived}
         workspace={workspace}
         runtime={runtime}
+        latestRun={latestRun}
         contextPercent={contextPercent}
-        archiveDisabled={Boolean(taskStateError)}
+        archiveDisabled={environmentBusy || taskStateLoading || Boolean(taskStateError)}
         canUndo={canUndo}
         undoing={undoing}
         timeline={timeline}
         showChatExport={showChatExport}
         onFocusView={onFocusView}
+        onRetryRun={onRetryRun}
         onToggleArchived={onToggleArchived}
         onUndo={onUndo}
       />
@@ -307,15 +361,18 @@ export function TaskWorkspace({
           runtime={runtime}
           showReasoningSummaries={showReasoningSummaries}
           expandToolOutput={expandToolOutput}
+          historyLoading={taskStateLoading}
+          canFork={canFork}
+          onForkTask={onForkTask}
           onResolveApproval={onResolveApproval}
-        onReviewChanges={() => onFocusView("changes")}
-        canUndo={canUndo}
-        undoing={undoing}
-        onUndo={onUndo}
-        historyHasMore={historyHasMore}
-        historyLoadingOlder={historyLoadingOlder}
-        onLoadOlderHistory={onLoadOlderHistory}
-      />
+          onReviewChanges={() => onFocusView("changes")}
+          canUndo={canUndo}
+          undoing={undoing}
+          onUndo={onUndo}
+          historyHasMore={historyHasMore}
+          historyLoadingOlder={historyLoadingOlder}
+          onLoadOlderHistory={onLoadOlderHistory}
+        />
       </div>
       <MessageNavigator timeline={timeline} onJump={scrollToEntry} />
       {showScrollBottom ? <button className="task-scroll-bottom" type="button" aria-label="Scroll to latest message" title="Scroll to bottom" onClick={scrollToBottom}><XiaoIcon name="send" size={16} /></button> : null}

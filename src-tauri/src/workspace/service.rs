@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::execution::models::ExecutionContext;
 use crate::git::service::read_git_summary;
 
 use super::models::{FileKind, FileNode, WorkspaceSnapshot};
@@ -8,10 +9,11 @@ use super::models::{FileKind, FileNode, WorkspaceSnapshot};
 const SKIPPED_DIRECTORIES: &[&str] = &[".git", "node_modules", "target", "dist", ".idea"];
 const MAX_FILE_PREVIEW_BYTES: u64 = 512 * 1024;
 
-pub fn snapshot_workspace(path: Option<&str>) -> Result<WorkspaceSnapshot, String> {
-    let root = resolve_workspace(path)?;
+pub fn snapshot_workspace(context: ExecutionContext) -> Result<WorkspaceSnapshot, String> {
+    let project = resolve_workspace(Some(&context.project_path))?;
+    let root = resolve_workspace(Some(&context.execution_root))?;
     let files = read_directory(&root, &root)?;
-    let name = root
+    let name = project
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("workspace")
@@ -19,7 +21,8 @@ pub fn snapshot_workspace(path: Option<&str>) -> Result<WorkspaceSnapshot, Strin
 
     Ok(WorkspaceSnapshot {
         name,
-        path: display_path(&root),
+        path: display_path(&project),
+        execution: context,
         git: read_git_summary(&root),
         files,
     })
@@ -40,10 +43,10 @@ fn display_path(path: &Path) -> String {
 }
 
 pub fn list_workspace_directory(
-    workspace_path: &str,
+    execution_root: &str,
     relative_path: &str,
 ) -> Result<Vec<FileNode>, String> {
-    let root = resolve_workspace(Some(workspace_path))?;
+    let root = resolve_workspace(Some(execution_root))?;
     let relative = validate_relative_path(relative_path)?;
     let directory = root.join(relative);
     let directory = directory
@@ -56,10 +59,10 @@ pub fn list_workspace_directory(
 }
 
 pub fn read_workspace_text_file(
-    workspace_path: &str,
+    execution_root: &str,
     relative_path: &str,
 ) -> Result<String, String> {
-    let root = resolve_workspace(Some(workspace_path))?;
+    let root = resolve_workspace(Some(execution_root))?;
     let relative = validate_relative_path(relative_path)?;
     let path = root.join(relative);
     let path = path
@@ -158,11 +161,36 @@ fn read_directory(root: &Path, directory: &Path) -> Result<Vec<FileNode>, String
 
 #[cfg(test)]
 mod tests {
+    use crate::execution::models::{ExecutionContext, ExecutionEnvironmentSummary};
+    use crate::xiao::models::XiaoWorkspaceMode;
+
     use super::{list_workspace_directory, snapshot_workspace};
+
+    fn local_context() -> ExecutionContext {
+        let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        ExecutionContext {
+            project_path: project.clone(),
+            execution_root: project,
+            environment: ExecutionEnvironmentSummary {
+                id: "test".to_owned(),
+                kind: "windows".to_owned(),
+                label: "Windows local".to_owned(),
+                availability: "available".to_owned(),
+            },
+            workspace_mode: XiaoWorkspaceMode::Local,
+            managed_worktree: None,
+            isolation_available: true,
+            isolation_unavailable_reason: None,
+        }
+    }
 
     #[test]
     fn snapshots_an_existing_workspace() {
-        let snapshot = snapshot_workspace(Some(env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let snapshot = snapshot_workspace(local_context()).unwrap();
         assert_eq!(snapshot.name, "xiao");
         assert!(!snapshot.files.is_empty());
     }
@@ -170,13 +198,14 @@ mod tests {
     #[test]
     fn lists_nested_directories_on_demand() {
         let entries =
-            list_workspace_directory(env!("CARGO_MANIFEST_DIR"), "src-tauri/src/agent").unwrap();
+            list_workspace_directory(&local_context().execution_root, "src-tauri/src/agent")
+                .unwrap();
         assert!(entries.iter().any(|entry| entry.name == "runtime.rs"));
     }
 
     #[test]
     fn rejects_paths_outside_the_workspace() {
-        let result = list_workspace_directory(env!("CARGO_MANIFEST_DIR"), "../");
+        let result = list_workspace_directory(&local_context().execution_root, "../");
         assert!(result.is_err());
     }
 }

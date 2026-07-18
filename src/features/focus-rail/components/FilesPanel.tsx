@@ -6,6 +6,7 @@ import type { FileNode, WorkspaceSnapshot } from "../../../core/models/workspace
 
 type FilesPanelProps = {
   workspace: WorkspaceSnapshot;
+  taskId: string | null;
   loading: boolean;
   onLoadDirectory: (path: string) => Promise<FileNode[]>;
 };
@@ -81,7 +82,7 @@ function FileTreeNode({
   );
 }
 
-export function FilesPanel({ workspace, loading, onLoadDirectory }: FilesPanelProps) {
+export function FilesPanel({ workspace, taskId, loading, onLoadDirectory }: FilesPanelProps) {
   const [childrenByPath, setChildrenByPath] = useState(new Map<string, FileNode[]>());
   const [loadingPaths, setLoadingPaths] = useState(new Set<string>());
   const [errorsByPath, setErrorsByPath] = useState(new Map<string, string>());
@@ -125,7 +126,10 @@ export function FilesPanel({ workspace, loading, onLoadDirectory }: FilesPanelPr
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      setPreview({ path: node.path, content: await nativeBridge.readWorkspaceFile(workspace.path, node.path) });
+      setPreview({
+        path: node.path,
+        content: await nativeBridge.readWorkspaceFile(workspace.path, taskId, node.path),
+      });
     } catch (reason) {
       setPreview(null);
       setPreviewError(reason instanceof Error ? reason.message : String(reason));
@@ -144,7 +148,7 @@ export function FilesPanel({ workspace, loading, onLoadDirectory }: FilesPanelPr
         <XiaoIcon name="folderOpen" size={20} />
       </header>
 
-      <p className="workspace-path">{workspace.path}</p>
+      <p className="workspace-path">{workspace.execution.executionRoot}</p>
       {loading ? (
         <div className="file-skeleton" aria-label="Loading files">
           <span />

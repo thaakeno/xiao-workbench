@@ -33,6 +33,8 @@ export type AgentQuestion = {
 
 export type AgentQuestionRequest = {
   requestId: number | string;
+  pendingInputId: string;
+  runId: string;
   taskId: string;
   threadId: string;
   turnId: string;
@@ -57,6 +59,8 @@ export type TimelineEntry = {
   files?: Array<{ path: string; additions: number; deletions: number; patch?: string }>;
   attachments?: AgentAttachment[];
   requestId?: number | string;
+  pendingInputId?: string;
+  runId?: string;
   approvalKind?: AgentApprovalRequestKind;
   approvalPermissions?: Record<string, unknown>;
   turnId?: string;
@@ -242,17 +246,19 @@ export type AgentModelSummary = {
   isDefault: boolean;
   defaultReasoningEffort: string;
   supportedReasoningEfforts: AgentReasoningEffortOption[];
+  serviceTiers: AgentModelServiceTier[];
   contextWindow?: number | null;
+};
+
+export type AgentModelServiceTier = {
+  id: string;
+  name: string;
+  description: string;
 };
 
 export type AgentReasoningEffortOption = {
   reasoningEffort: string;
   description: string;
-};
-
-export type AgentSessionStart = {
-  threadId: string;
-  model: string;
 };
 
 export type XiaoHistoryItem = {

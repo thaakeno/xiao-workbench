@@ -43,6 +43,14 @@ pub struct AgentThreadTokenUsage {
     pub daily_usage_buckets: Vec<AgentDailyUsageBucket>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelServiceTier {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentModelSummary {
@@ -53,6 +61,7 @@ pub struct AgentModelSummary {
     pub is_default: bool,
     pub default_reasoning_effort: String,
     pub supported_reasoning_efforts: Vec<AgentReasoningEffortOption>,
+    pub service_tiers: Vec<AgentModelServiceTier>,
     pub context_window: Option<u64>,
 }
 
@@ -63,14 +72,7 @@ pub struct AgentReasoningEffortOption {
     pub description: String,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentSessionStart {
-    pub thread_id: String,
-    pub model: String,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct XiaoHistoryItem {
     pub role: String,
     pub text: String,
@@ -99,16 +101,31 @@ pub(crate) struct ModelRecord {
     #[serde(default)]
     pub supported_reasoning_efforts: Vec<AgentReasoningEffortOption>,
     #[serde(default)]
+    pub service_tiers: Vec<AgentModelServiceTier>,
+    #[serde(default)]
     pub context_window: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ThreadStartResponse {
     pub thread: ThreadRecord,
-    pub model: String,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadRecord {
     pub id: String,
+    #[serde(default)]
+    pub ephemeral: Option<bool>,
+    #[serde(default)]
+    pub thread_source: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PersistentAgentSession {
+    pub thread_id: String,
+    pub model: Option<String>,
+    pub materialized: bool,
 }

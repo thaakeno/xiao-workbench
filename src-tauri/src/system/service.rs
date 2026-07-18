@@ -210,7 +210,25 @@ pub(crate) fn codex_command() -> Option<Command> {
 
 #[cfg(windows)]
 fn command_for_codex_path(path: PathBuf) -> Command {
-    Command::new(path)
+    // The standalone installer exposes `bin` through a junction. Launching that
+    // alias makes Codex resolve bundled sandbox helpers beside the junction
+    // instead of beside the real release executable.
+    let executable = std::fs::canonicalize(&path)
+        .map(strip_windows_verbatim_prefix)
+        .unwrap_or(path);
+    Command::new(executable)
+}
+
+#[cfg(windows)]
+fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let value = path.to_string_lossy();
+    if let Some(path) = value.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{path}"));
+    }
+    if let Some(path) = value.strip_prefix(r"\\?\") {
+        return PathBuf::from(path);
+    }
+    path
 }
 
 fn npm_prefix() -> Option<PathBuf> {
@@ -464,6 +482,44 @@ mod tests {
             Path::new(r"C:\Users\xiao\AppData\Roaming\npm-backup\codex.cmd"),
             prefix,
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_codex_executable_resolves_installer_junction_before_launch() {
+        let directory = std::env::temp_dir().join(format!(
+            "xiao-codex-native-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let release_bin = directory.join("release").join("bin");
+        let alias_bin = directory.join("install").join("bin");
+        std::fs::create_dir_all(&release_bin).unwrap();
+        std::fs::create_dir_all(alias_bin.parent().unwrap()).unwrap();
+        let executable = release_bin.join("codex.exe");
+        std::fs::write(&executable, []).unwrap();
+        let junction = Command::new("cmd.exe")
+            .args(["/D", "/Q", "/C", "mklink", "/J"])
+            .arg(&alias_bin)
+            .arg(&release_bin)
+            .output()
+            .unwrap();
+        assert!(
+            junction.status.success(),
+            "could not create test junction: {}",
+            String::from_utf8_lossy(&junction.stderr)
+        );
+
+        let alias_executable = alias_bin.join("codex.exe");
+        let command = command_for_codex_path(alias_executable.clone());
+        let expected = strip_windows_verbatim_prefix(std::fs::canonicalize(executable).unwrap());
+
+        assert_eq!(command.get_program(), expected.as_os_str());
+        assert_ne!(command.get_program(), alias_executable.as_os_str());
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[cfg(windows)]

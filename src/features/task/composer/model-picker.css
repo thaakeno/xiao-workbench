@@ -6,13 +6,15 @@
 }
 
 .model-picker,
-.reasoning-picker {
+.reasoning-picker,
+.fast-mode {
   position: relative;
   min-width: 0;
 }
 
 .composer__tools-left .model-picker__trigger,
-.composer__tools-left .reasoning-picker__trigger {
+.composer__tools-left .reasoning-picker__trigger,
+.composer__tools-left .fast-mode__trigger {
   display: inline-flex;
   width: auto;
   max-width: 230px;
@@ -30,8 +32,14 @@
   max-width: 100px;
 }
 
+.composer__tools-left .fast-mode__trigger {
+  max-width: 82px;
+  padding: 0 8px;
+}
+
 .model-picker__trigger > span,
-.reasoning-picker__trigger > span {
+.reasoning-picker__trigger > span,
+.fast-mode__trigger > span {
   overflow: hidden;
   font-size: var(--text-label);
   font-weight: 520;
@@ -62,6 +70,7 @@
 
 .composer__tools-left .model-picker__trigger:hover,
 .composer__tools-left .reasoning-picker__trigger:hover,
+.composer__tools-left .fast-mode__trigger:hover:not(:disabled),
 .model-picker__trigger[aria-expanded="true"],
 .reasoning-picker__trigger[aria-expanded="true"] {
   background: var(--surface-hover);
@@ -74,6 +83,25 @@
 
 :root[data-theme="dark"] .composer__tools-left .reasoning-picker__trigger.is-ultra {
   color: #b49af8;
+}
+
+.fast-mode__trigger > i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background 130ms ease, box-shadow 130ms ease;
+}
+
+.composer__tools-left .fast-mode__trigger.is-on {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.fast-mode__trigger.is-on > i {
+  background: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 12%, transparent);
 }
 
 .picker-menu {
@@ -183,7 +211,7 @@
 
 .picker-menu button > span {
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -217,7 +245,8 @@
     flex: 1;
   }
 
-  .reasoning-picker {
+  .reasoning-picker,
+  .fast-mode {
     flex: 0 0 auto;
   }
 
@@ -228,6 +257,11 @@
 
   .composer__tools-left .reasoning-picker__trigger {
     max-width: 76px;
+  }
+
+  .composer__tools-left .fast-mode__trigger {
+    max-width: 72px;
+    padding: 0 6px;
   }
 
   .model-picker__menu {

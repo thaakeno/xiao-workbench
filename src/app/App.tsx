@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -12,7 +13,14 @@ import type {
   ThreadChangeSummary,
   TimelineEntry,
 } from "../core/models/agent";
-import type { XiaoProjectSummary, XiaoWorkspaceDocument } from "../core/models/xiao";
+import type { RoutineOpenRunTarget, RoutineSummary } from "../core/models/routine";
+import type {
+  XiaoProjectSummary,
+  XiaoWorkspaceDocument,
+  XiaoWorkspaceMode,
+  XiaoWorkspaceUpdate,
+} from "../core/models/xiao";
+import { serviceTierForFastMode } from "../features/agent/hooks/agentProtocol";
 import { titleFromPrompt, useAgentRuntime } from "../features/agent/hooks/useAgentRuntime";
 import {
   listCodexThreads,
@@ -22,8 +30,9 @@ import {
 } from "../features/agent/history/codexHistory";
 import { CommandMenu } from "../features/command-menu/components/CommandMenu";
 import { FocusRail } from "../features/focus-rail/components/FocusRail";
-import type { ScheduledTask } from "../features/focus-rail/components/SchedulePanel";
+import type { RoutineDraft } from "../features/focus-rail/components/SchedulePanel";
 import type { FocusView } from "../features/focus-rail/focus-rail.types";
+import { useRoutines } from "../features/focus-rail/hooks/useRoutines";
 import { ProfilePage } from "../features/profile/components/ProfilePage";
 import { useLocalProfile } from "../features/profile/hooks/useLocalProfile";
 import {
@@ -41,12 +50,26 @@ import { GlobalContextMenu } from "../features/shell/components/GlobalContextMen
 import { Sidebar } from "../features/shell/components/Sidebar";
 import { TitleBar } from "../features/shell/components/TitleBar";
 import type { AppPage } from "../features/shell/shell.types";
+import { managedWorktreeCleanupMessage } from "../features/task/taskEnvironment";
+import { forkTaskFromEntry } from "../features/task/taskFork";
+import {
+  completeTimelineMetadata,
+  mergeTimelinePage,
+  toXiaoTaskDocument,
+} from "../features/task/taskPersistence";
 import type { TaskGroup, WorkbenchTask } from "../features/task/task.types";
 import { TaskWorkspace } from "../features/task/workspace/TaskWorkspace";
 import { useWorkspace } from "../features/workspace/hooks/useWorkspace";
 
 type StoredTaskState = {
   tasks: WorkbenchTask[];
+  activeTaskId: string | null;
+  showArchived: boolean;
+};
+
+type PersistedWorkspaceSnapshot = {
+  tasks: Map<string, WorkbenchTask>;
+  taskIds: string[];
   activeTaskId: string | null;
   showArchived: boolean;
 };
@@ -65,7 +88,6 @@ const projectSnapshotStorageKey = "xiao.project-snapshot.v1";
 const codexThreadSnapshotStorageKey = "xiao.codex-thread-snapshot.v1";
 const usageSnapshotStorageKey = "xiao.usage-snapshot.v1";
 const changeSummarySnapshotStorageKey = "xiao.thread-change-summaries.v1";
-const scheduleStorageKey = (workspacePath: string) => `xiao.schedules.v1:${workspacePath}`;
 const projectPathKey = (path: string) => path.replace(/[\\/]+$/, "").toLocaleLowerCase();
 const readSnapshot = <T,>(key: string, fallback: T): T => {
   try { return JSON.parse(window.localStorage.getItem(key) ?? "null") ?? fallback; }
@@ -75,24 +97,12 @@ const writeSnapshot = (key: string, value: unknown) => {
   try { window.localStorage.setItem(key, JSON.stringify(value)); }
   catch { /* A fresh native refresh will still populate the view. */ }
 };
+const comparableWorkspacePath = (path: string) =>
+  path.replaceAll("\\", "/").replace(/\/$/, "").toLocaleLowerCase();
 
 const readActiveProjectPath = () => {
   try { return window.localStorage.getItem(activeProjectStorageKey) || undefined; }
   catch { return undefined; }
-};
-
-const readScheduledTasks = (workspacePath: string): ScheduledTask[] => {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(scheduleStorageKey(workspacePath)) ?? "[]") as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is ScheduledTask => {
-          if (!item || typeof item !== "object") return false;
-          const task = item as Partial<ScheduledTask>;
-          return typeof task.id === "string" && typeof task.prompt === "string" &&
-            typeof task.runAt === "number" && ["pending", "running", "completed", "failed"].includes(task.status ?? "");
-        }).map((task) => task.status === "running" ? { ...task, status: "failed" as const } : task)
-      : [];
-  } catch { return []; }
 };
 
 const readProjectPreferences = (): ProjectPreferences => {
@@ -157,16 +167,24 @@ const createDraftTask = (defaults: TaskRunDefaults): WorkbenchTask => {
     model: defaults.model,
     reasoningEffort: defaults.reasoningEffort,
     threadId: null,
+    threadBinding: null,
     mode: defaults.mode,
     approvalPolicy: defaults.approvalPolicy,
     sandboxMode: defaults.sandboxMode,
     goal: null,
     timeline: [],
+    timelineLoaded: true,
+    timelineComplete: true,
+    timelineStart: 0,
+    timelineEntryCount: 0,
     plan: null,
     origin: "xiao",
     historyLoaded: true,
     historyCursor: null,
     historyLoadingOlder: false,
+    executionEnvironmentId: null,
+    workspaceMode: "local",
+    managedWorktreeId: null,
   };
 };
 
@@ -203,13 +221,37 @@ const taskGroup = (updatedAt: number, active: boolean): TaskGroup => {
 
 type StoredWorkbenchTask = Omit<
   WorkbenchTask,
-  "approvalPolicy" | "draftText" | "followUps" | "goal" | "mode" | "plan" | "reasoningEffort" | "sandboxMode" | "threadId"
+  | "approvalPolicy"
+  | "draftText"
+  | "followUps"
+  | "executionEnvironmentId"
+  | "goal"
+  | "managedWorktreeId"
+  | "mode"
+  | "plan"
+  | "reasoningEffort"
+  | "sandboxMode"
+  | "threadBinding"
+  | "threadId"
+  | "timelineComplete"
+  | "timelineEntryCount"
+  | "timelineLoaded"
+  | "timelineStart"
+  | "workspaceMode"
 > & {
   draftText?: string;
   followUps?: WorkbenchTask["followUps"];
   reasoningEffort?: string | null;
   plan?: AgentPlan | null;
   threadId?: string | null;
+  threadBinding?: WorkbenchTask["threadBinding"];
+  timelineLoaded?: boolean;
+  timelineComplete?: boolean;
+  timelineStart?: number;
+  timelineEntryCount?: number;
+  executionEnvironmentId?: string | null;
+  workspaceMode?: "local" | "managed-worktree";
+  managedWorktreeId?: string | null;
   mode?: "default" | "plan";
   approvalPolicy?: "never" | "on-request" | "untrusted";
   sandboxMode?: "danger-full-access" | "read-only" | "workspace-write";
@@ -269,6 +311,18 @@ const isAgentFollowUp = (value: unknown): value is WorkbenchTask["followUps"][nu
   );
 };
 
+const isThreadBinding = (value: unknown): value is WorkbenchTask["threadBinding"] => {
+  if (!value || typeof value !== "object") return false;
+  const binding = value as Record<string, unknown>;
+  return (
+    typeof binding.threadId === "string" &&
+    ["ephemeral", "persistent", "legacy-untrusted"].includes(String(binding.persistence)) &&
+    typeof binding.materialized === "boolean" &&
+    (binding.threadSource === null || typeof binding.threadSource === "string") &&
+    (binding.cliVersion === null || typeof binding.cliVersion === "string")
+  );
+};
+
 const isWorkbenchTask = (value: unknown): value is StoredWorkbenchTask => {
   if (!value || typeof value !== "object") return false;
   const task = value as Record<string, unknown>;
@@ -290,6 +344,17 @@ const isWorkbenchTask = (value: unknown): value is StoredWorkbenchTask => {
       task.reasoningEffort === null ||
       typeof task.reasoningEffort === "string") &&
     (task.threadId === undefined || task.threadId === null || typeof task.threadId === "string") &&
+    (task.threadBinding === undefined || task.threadBinding === null || isThreadBinding(task.threadBinding)) &&
+    (task.timelineLoaded === undefined || typeof task.timelineLoaded === "boolean") &&
+    (task.timelineComplete === undefined || typeof task.timelineComplete === "boolean") &&
+    (task.timelineStart === undefined || (typeof task.timelineStart === "number" && task.timelineStart >= 0)) &&
+    (task.timelineEntryCount === undefined ||
+      (typeof task.timelineEntryCount === "number" && task.timelineEntryCount >= 0)) &&
+    (task.executionEnvironmentId === undefined || task.executionEnvironmentId === null ||
+      typeof task.executionEnvironmentId === "string") &&
+    (task.workspaceMode === undefined || ["local", "managed-worktree"].includes(String(task.workspaceMode))) &&
+    (task.managedWorktreeId === undefined || task.managedWorktreeId === null ||
+      typeof task.managedWorktreeId === "string") &&
     (task.mode === undefined || task.mode === "default" || task.mode === "plan") &&
     (task.approvalPolicy === undefined ||
       ["never", "on-request", "untrusted"].includes(String(task.approvalPolicy))) &&
@@ -309,6 +374,9 @@ const isLegacyEmptyDraft = (task: StoredWorkbenchTask) =>
   task.model === null &&
   (task.reasoningEffort === undefined || task.reasoningEffort === null) &&
   (task.threadId === undefined || task.threadId === null) &&
+  (task.threadBinding === undefined || task.threadBinding === null) &&
+  (task.workspaceMode === undefined || task.workspaceMode === "local") &&
+  (task.managedWorktreeId === undefined || task.managedWorktreeId === null) &&
   (task.mode === undefined || task.mode === "default") &&
   (task.approvalPolicy === undefined || task.approvalPolicy === "on-request") &&
   (task.sandboxMode === undefined || task.sandboxMode === "workspace-write") &&
@@ -345,12 +413,20 @@ const readBrowserTaskState = (workspacePath: string): StoredTaskState => {
         followUps: task.followUps ?? [],
         reasoningEffort: task.reasoningEffort ?? null,
         threadId: task.threadId ?? null,
+        threadBinding: task.threadBinding ?? null,
         mode: task.mode ?? "default",
         approvalPolicy: task.approvalPolicy ?? "on-request",
         sandboxMode: task.sandboxMode ?? "workspace-write",
         goal: task.goal ?? null,
         plan: activeAgentPlan(task.plan),
         unread: task.unread ?? false,
+        timelineLoaded: true,
+        timelineComplete: true,
+        timelineStart: 0,
+        timelineEntryCount: task.timeline.length,
+        executionEnvironmentId: task.executionEnvironmentId ?? null,
+        workspaceMode: task.workspaceMode ?? "local",
+        managedWorktreeId: task.managedWorktreeId ?? null,
       }));
     const activeTaskId =
       typeof parsed.activeTaskId === "string" &&
@@ -374,33 +450,62 @@ const stateFromDocument = (document: XiaoWorkspaceDocument): StoredTaskState => 
     ...task,
     draftText: task.draftText ?? "",
     followUps: task.followUps ?? [],
-    threadId: task.threadId ?? null,
+    threadId: null,
+    threadBinding: task.threadBinding ?? null,
     mode: task.mode ?? "default",
     approvalPolicy: task.approvalPolicy ?? "on-request",
     sandboxMode: task.sandboxMode ?? "workspace-write",
     goal: task.goal ?? null,
     plan: activeAgentPlan(task.plan),
     unread: task.unread ?? false,
+    timelineLoaded: task.timelineLoaded,
+    timelineComplete: task.timelineComplete,
+    timelineStart: task.timelineStart,
+    timelineEntryCount: task.timelineEntryCount,
+    executionEnvironmentId: task.executionEnvironmentId ?? null,
+    workspaceMode: task.workspaceMode ?? "local",
+    managedWorktreeId: task.managedWorktreeId ?? null,
     meta: taskMeta(task.updatedAt),
     group: taskGroup(task.updatedAt, task.id === document.activeTaskId && !task.archived),
   })),
 });
 
-const documentFromState = (
+const snapshotFromState = (state: StoredTaskState): PersistedWorkspaceSnapshot => ({
+  tasks: new Map(state.tasks.map((task) => [task.id, task])),
+  taskIds: state.tasks.map((task) => task.id),
+  activeTaskId: state.activeTaskId,
+  showArchived: state.showArchived,
+});
+
+const updateFromState = (
   workspacePath: string,
   state: StoredTaskState,
-): XiaoWorkspaceDocument => {
-  const localTasks = state.tasks.filter((task) => task.origin !== "codex");
+  previous?: PersistedWorkspaceSnapshot,
+): XiaoWorkspaceUpdate => {
+  const changedTasks = previous
+    ? state.tasks.filter((task) => previous.tasks.get(task.id) !== task)
+    : state.tasks;
   return {
     schemaVersion: 1,
     workspacePath,
-    activeTaskId: localTasks.some((task) => task.id === state.activeTaskId)
-      ? state.activeTaskId
-      : null,
+    activeTaskId: state.activeTaskId,
     showArchived: state.showArchived,
-    tasks: localTasks.map(({ meta: _meta, group: _group, ...task }) => task),
+    taskIds: state.tasks.map((task) => task.id),
+    tasks: changedTasks.map((task) => {
+      const previousTask = previous?.tasks.get(task.id);
+      return toXiaoTaskDocument(task, !previousTask || previousTask.timeline !== task.timeline);
+    }),
   };
 };
+
+const updateFromDocument = (document: XiaoWorkspaceDocument): XiaoWorkspaceUpdate => ({
+  schemaVersion: document.schemaVersion,
+  workspacePath: document.workspacePath,
+  activeTaskId: document.activeTaskId,
+  showArchived: document.showArchived,
+  taskIds: document.tasks.map((task) => task.id),
+  tasks: document.tasks,
+});
 
 const taskFromCodexThread = (thread: CodexThreadSummary): WorkbenchTask => ({
   id: `codex:${thread.id}`,
@@ -417,16 +522,24 @@ const taskFromCodexThread = (thread: CodexThreadSummary): WorkbenchTask => ({
   model: null,
   reasoningEffort: null,
   threadId: thread.id,
+  threadBinding: null,
   mode: "default",
   approvalPolicy: "on-request",
   sandboxMode: "workspace-write",
   goal: null,
   timeline: [],
+  timelineLoaded: true,
+  timelineComplete: true,
+  timelineStart: 0,
+  timelineEntryCount: 0,
   plan: null,
   origin: "codex",
   historyLoaded: false,
   historyCursor: null,
   historyLoadingOlder: false,
+  executionEnvironmentId: null,
+  workspaceMode: "local",
+  managedWorktreeId: null,
 });
 
 const mergeCodexTasks = (
@@ -473,14 +586,6 @@ const mergeProject = (
 export function App() {
   const { profile, saveProfile } = useLocalProfile();
   const [activeProjectPath, setActiveProjectPath] = useState<string | undefined>(readActiveProjectPath);
-  const {
-    workspace,
-    system,
-    loading,
-    error: workspaceError,
-    refresh,
-    loadDirectory,
-  } = useWorkspace(activeProjectPath);
   const { theme, setTheme } = useTheme();
   const { preferences, updatePreferences, updateTaskRunDefaults } = useAppPreferences();
   const codexUpdate = useCodexUpdate();
@@ -495,7 +600,11 @@ export function App() {
   const [taskWorkspacePath, setTaskWorkspacePath] = useState("");
   const [taskStateReady, setTaskStateReady] = useState(!isTauriHost());
   const [taskLoadError, setTaskLoadError] = useState<string | null>(null);
+  const [taskHistoryError, setTaskHistoryError] = useState<string | null>(null);
   const [taskSaveError, setTaskSaveError] = useState<string | null>(null);
+  const [taskHistoryLoadingId, setTaskHistoryLoadingId] = useState<string | null>(null);
+  const [environmentBusyTaskId, setEnvironmentBusyTaskId] = useState<string | null>(null);
+  const [environmentError, setEnvironmentError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<WorkbenchTask[]>(initialTaskState.tasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTaskState.activeTaskId);
   const [draftTask, setDraftTask] = useState(() => createDraftTask(preferences.taskRunDefaults));
@@ -509,6 +618,7 @@ export function App() {
   const projectPreferencesRef = useRef(projectPreferences);
   const archivedRefreshId = useRef(0);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const persistedWorkspaceSnapshotsRef = useRef(new Map<string, PersistedWorkspaceSnapshot>());
   const latestTaskStateRef = useRef<{ path: string; state: StoredTaskState } | null>(null);
   const focusedLaunchTaskRef = useRef<string | null>(null);
   const notifiedRuntimeErrorRef = useRef<string | null>(null);
@@ -534,18 +644,38 @@ export function App() {
   const [archivedTasks, setArchivedTasks] = useState<ArchivedTaskItem[]>([]);
   const [archivedTasksLoading, setArchivedTasksLoading] = useState(false);
   const [archivedTasksError, setArchivedTasksError] = useState<string | null>(null);
-  const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
   const [reviewContextByTask, setReviewContextByTask] = useState<Record<string, AgentAttachment[]>>({});
   const [restoredAttachmentsByTask, setRestoredAttachmentsByTask] = useState<Record<string, AgentAttachment[]>>({});
-  const [scheduleWorkspacePath, setScheduleWorkspacePath] = useState("");
-  const [pendingScheduledPrompt, setPendingScheduledPrompt] = useState<{ id: string; taskId: string; prompt: string } | null>(null);
-  const scheduleSubmittingRef = useRef<string | null>(null);
+  const [routineOpenTarget, setRoutineOpenTarget] = useState<RoutineOpenRunTarget | null>(null);
+  const handledRoutineRunRef = useRef<string | null>(null);
   const [sendingFollowUpId, setSendingFollowUpId] = useState<string | null>(null);
   const [failedFollowUpId, setFailedFollowUpId] = useState<string | null>(null);
   const selectedTask = tasks.find((task) => task.id === activeTaskId) ?? null;
   const activeTask = selectedTask ?? draftTask;
-  const taskStateError = taskLoadError ?? taskSaveError;
+  const executionTaskId = activeProjectPath === taskWorkspacePath ? selectedTask?.id ?? null : null;
+  const {
+    workspace,
+    system,
+    loading,
+    error: workspaceError,
+    refresh,
+    loadDirectory,
+  } = useWorkspace(activeProjectPath, executionTaskId);
+  const routineController = useRoutines(workspace.path);
+  const activeTaskHistoryLoading = Boolean(
+    selectedTask && !selectedTask.timelineComplete && !taskHistoryError,
+  );
+  const activeEnvironmentBusy = environmentBusyTaskId === activeTask.id;
+  const taskStateError = taskLoadError ?? taskHistoryError ?? taskSaveError;
   const pendingReviewContext = reviewContextByTask[activeTask.id] ?? [];
+  const dangerousRoutineIds = new Set(
+    routineController.routines
+      .filter((routine) =>
+        routine.sandboxMode === "danger-full-access" ||
+        tasks.find((task) => task.id === routine.taskId)?.sandboxMode === "danger-full-access",
+      )
+      .map((routine) => routine.id),
+  );
   const focusedLaunch =
     taskStateReady &&
     taskWorkspacePath === workspace.path &&
@@ -553,7 +683,15 @@ export function App() {
     selectedTask != null &&
     selectedTask.origin !== "codex" &&
     !selectedTask.archived &&
+    routineOpenTarget?.taskId !== activeTask.id &&
+    activeTask.timelineComplete &&
     activeTask.timeline.length === 0;
+  if (taskStateReady && taskWorkspacePath === workspace.path) {
+    latestTaskStateRef.current = {
+      path: workspace.path,
+      state: { tasks, activeTaskId, showArchived: false },
+    };
+  }
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebarOnNarrow = useCallback(() => {
@@ -569,33 +707,53 @@ export function App() {
     setFocusPanelOpen(false);
   }, [activeTask.id, focusedLaunch, preferences.focusNewTasks, workspace.path]);
 
-  const enqueueDocumentSave = useCallback((document: XiaoWorkspaceDocument) => {
+  const enqueueWorkspaceSave = useCallback((update: XiaoWorkspaceUpdate) => {
     const operation = saveQueueRef.current
       .catch(() => undefined)
-      .then(() => nativeBridge.saveXiaoWorkspace(document));
+      .then(() => nativeBridge.saveXiaoWorkspace(update));
     saveQueueRef.current = operation;
     return operation;
   }, []);
 
   const persistTaskState = useCallback(
     (path: string, state: StoredTaskState) => {
-      const operation = isTauriHost()
-        ? enqueueDocumentSave(documentFromState(path, state))
-        : new Promise<void>((resolve, reject) => {
-            try {
-              window.localStorage.setItem(taskStorageKey(path), JSON.stringify(state));
-              resolve();
-            } catch (reason) {
-              reject(reason);
-            }
+      let operation: Promise<void>;
+      if (isTauriHost()) {
+        const previous = persistedWorkspaceSnapshotsRef.current.get(path);
+        const update = updateFromState(path, state, previous);
+        const taskIdsChanged =
+          !previous ||
+          previous.taskIds.length !== update.taskIds.length ||
+          previous.taskIds.some((taskId, index) => taskId !== update.taskIds[index]);
+        const workspaceChanged =
+          !previous ||
+          previous.activeTaskId !== state.activeTaskId ||
+          previous.showArchived !== state.showArchived;
+        if (!update.tasks.length && !taskIdsChanged && !workspaceChanged) {
+          operation = Promise.resolve();
+        } else {
+          const nextSnapshot = snapshotFromState(state);
+          operation = enqueueWorkspaceSave(update).then(() => {
+            persistedWorkspaceSnapshotsRef.current.set(path, nextSnapshot);
           });
+        }
+      } else {
+        operation = new Promise<void>((resolve, reject) => {
+          try {
+            window.localStorage.setItem(taskStorageKey(path), JSON.stringify(state));
+            resolve();
+          } catch (reason) {
+            reject(reason);
+          }
+        });
+      }
 
       void operation.then(() => setTaskSaveError(null)).catch((reason) => {
         setTaskSaveError(reason instanceof Error ? reason.message : String(reason));
       });
       return operation;
     },
-    [enqueueDocumentSave],
+    [enqueueWorkspaceSave],
   );
 
   useEffect(() => {
@@ -608,6 +766,46 @@ export function App() {
     try { window.localStorage.setItem(activeProjectStorageKey, activeProjectPath); }
     catch { /* The current session still keeps the selected project. */ }
   }, [activeProjectPath]);
+
+  useEffect(() => {
+    if (!isTauriHost()) return;
+    let disposed = false;
+    let removeListener: (() => void) | null = null;
+    void listen<RoutineOpenRunTarget>("xiao://routine-open-run", (event) => {
+      const target = event.payload;
+      handledRoutineRunRef.current = null;
+      setRoutineOpenTarget(target);
+      setActiveProjectPath(target.workspacePath);
+      setActivePage("tasks");
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else removeListener = unlisten;
+    }).catch((reason) => {
+      if (!disposed) console.error("Could not register the routine deep-link listener.", reason);
+    });
+    return () => {
+      disposed = true;
+      removeListener?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !routineOpenTarget ||
+      handledRoutineRunRef.current === routineOpenTarget.runId ||
+      !taskStateReady ||
+      comparableWorkspacePath(taskWorkspacePath) !== comparableWorkspacePath(routineOpenTarget.workspacePath) ||
+      !tasks.some((task) => task.id === routineOpenTarget.taskId)
+    ) return;
+    handledRoutineRunRef.current = routineOpenTarget.runId;
+    setActiveTaskId(routineOpenTarget.taskId);
+    setOpenTaskIds((current) => current.includes(routineOpenTarget.taskId)
+      ? current
+      : [...current, routineOpenTarget.taskId]);
+    setActivePage("tasks");
+    setFocusView("schedule");
+    setFocusPanelOpen(true);
+  }, [routineOpenTarget, taskStateReady, taskWorkspacePath, tasks]);
 
   useEffect(() => {
     if (!isTauriHost()) return;
@@ -638,6 +836,9 @@ export function App() {
     let cancelled = false;
     setTaskStateReady(false);
     setTaskLoadError(null);
+    setTaskHistoryError(null);
+    setEnvironmentError(null);
+    setEnvironmentBusyTaskId(null);
 
     const loadState = async () => {
       try {
@@ -653,6 +854,12 @@ export function App() {
           ...loadedState,
           tasks: mergeCodexTasks(loadedState.tasks, workspaceThreads),
         });
+        if (isTauriHost()) {
+          persistedWorkspaceSnapshotsRef.current.set(
+            workspace.path,
+            snapshotFromState(nextState),
+          );
+        }
         if (cancelled) return;
         const pendingThreadId = pendingCodexThreadRef.current;
         const pendingTaskId = pendingThreadId ? `codex:${pendingThreadId}` : null;
@@ -670,6 +877,7 @@ export function App() {
         setDraftTabOpen(nextState.activeTaskId === null);
         setTaskWorkspacePath(workspace.path);
         setRestoredAttachmentsByTask({});
+        setTaskHistoryLoadingId(null);
         setSendingFollowUpId(null);
         setFailedFollowUpId(null);
         setTaskStateReady(true);
@@ -695,7 +903,8 @@ export function App() {
         setDraftTask(createDraftTask(preferences.taskRunDefaults));
         setOpenTaskIds([]);
         setDraftTabOpen(true);
-        setTaskWorkspacePath("");
+        setTaskHistoryLoadingId(null);
+        setTaskWorkspacePath(workspace.path);
         setTaskLoadError(reason instanceof Error ? reason.message : String(reason));
       }
     };
@@ -707,18 +916,53 @@ export function App() {
   }, [codexThreads, loading, preferences.importCodexHistory, taskWorkspacePath, workspace.name, workspace.path]);
 
   useEffect(() => {
-    if (loading || scheduleWorkspacePath === workspace.path) return;
-    setScheduledTasks(readScheduledTasks(workspace.path));
-    setScheduleWorkspacePath(workspace.path);
-    setPendingScheduledPrompt(null);
-    scheduleSubmittingRef.current = null;
-  }, [loading, scheduleWorkspacePath, workspace.path]);
+    setTaskHistoryError(null);
+    setEnvironmentError(null);
+  }, [activeTaskId, taskWorkspacePath]);
 
   useEffect(() => {
-    if (!scheduleWorkspacePath || scheduleWorkspacePath !== workspace.path) return;
-    try { window.localStorage.setItem(scheduleStorageKey(workspace.path), JSON.stringify(scheduledTasks)); }
-    catch { /* Scheduling remains available for the current app session. */ }
-  }, [scheduleWorkspacePath, scheduledTasks, workspace.path]);
+    if (
+      !isTauriHost() ||
+      !taskStateReady ||
+      taskWorkspacePath !== workspace.path ||
+      !selectedTask ||
+      selectedTask.timelineComplete ||
+      taskHistoryLoadingId === selectedTask.id
+    ) return;
+
+    let cancelled = false;
+    const taskId = selectedTask.id;
+    const before = selectedTask.timelineLoaded ? selectedTask.timelineStart : null;
+    setTaskHistoryLoadingId(taskId);
+    setTaskHistoryError(null);
+    void nativeBridge
+      .loadXiaoTimelinePage(workspace.path, taskId, before)
+      .then((page) => {
+        if (cancelled) return;
+        setTaskHistoryLoadingId((current) => current === taskId ? null : current);
+        setTasks((current) =>
+          current.map((task) => task.id === taskId ? mergeTimelinePage(task, page) : task),
+        );
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        setTaskHistoryLoadingId((current) => current === taskId ? null : current);
+        setTaskHistoryError(reason instanceof Error ? reason.message : String(reason));
+      });
+
+    return () => {
+      cancelled = true;
+      setTaskHistoryLoadingId((current) => current === taskId ? null : current);
+    };
+  }, [
+    selectedTask?.id,
+    selectedTask?.timelineComplete,
+    selectedTask?.timelineLoaded,
+    selectedTask?.timelineStart,
+    taskStateReady,
+    taskWorkspacePath,
+    workspace.path,
+  ]);
 
   useEffect(() => {
     if (!taskStateReady || workspace.path !== taskWorkspacePath) return;
@@ -735,7 +979,7 @@ export function App() {
     setTasks((current) => {
       let changed = false;
       const next = current.map((task) => {
-        if (task.title !== "New task") return task;
+        if (task.title !== "New task" || !task.timelineComplete) return task;
         const firstPrompt = task.timeline.find(
           (entry) => entry.kind === "user" || entry.kind === "brief",
         );
@@ -779,13 +1023,25 @@ export function App() {
     setTasks((current) =>
       current.map((task) =>
         task.id === taskId
-          ? { ...task, timeline, updatedAt, meta: "Now", group: "Active" }
+          ? completeTimelineMetadata({
+              ...task,
+              timeline,
+              updatedAt,
+              meta: "Now",
+              group: "Active" as const,
+            })
           : task,
       ),
     );
     setDraftTask((current) =>
       current.id === taskId
-        ? { ...current, timeline, updatedAt, meta: "Now", group: "Active" }
+        ? completeTimelineMetadata({
+            ...current,
+            timeline,
+            updatedAt,
+            meta: "Now",
+            group: "Active" as const,
+          })
         : current,
     );
   }, []);
@@ -812,17 +1068,6 @@ export function App() {
     );
   }, []);
 
-  const updateTaskThread = useCallback((taskId: string, threadId: string) => {
-    setTasks((current) =>
-      current.map((task) =>
-        task.id === taskId ? { ...task, threadId, updatedAt: Date.now(), meta: "Now" } : task,
-      ),
-    );
-    setDraftTask((current) =>
-      current.id === taskId ? { ...current, threadId, updatedAt: Date.now(), meta: "Now" } : current,
-    );
-  }, []);
-
   const updateTaskGoal = useCallback((taskId: string, goal: AgentGoal | null) => {
     setTasks((current) =>
       current.map((task) =>
@@ -836,24 +1081,11 @@ export function App() {
 
   const markTaskFinished = useCallback(
     (taskId: string, outcome: AgentTurnOutcome) => {
-      const scheduled = pendingScheduledPrompt;
-      if (scheduled?.taskId === taskId) {
-        setScheduledTasks((current) => current.map((task) =>
-          task.id === scheduled.id
-            ? { ...task, status: outcome === "completed" ? "completed" : "failed" }
-            : task,
-        ));
-        setPendingScheduledPrompt(null);
-        scheduleSubmittingRef.current = null;
-        if (outcome === "completed" && preferences.notifyCompletions && "Notification" in window && Notification.permission === "granted") {
-          new Notification("Xiao finished a scheduled task", { body: scheduled.prompt });
-        }
-      }
       const finished = tasks.find((task) => task.id === taskId);
       if (
         outcome === "completed" &&
-        scheduled?.taskId !== taskId &&
         finished &&
+        !routineController.routines.some((routine) => routine.taskId === taskId) &&
         taskId !== activeTaskId &&
         preferences.notifyCompletions &&
         "Notification" in window &&
@@ -869,29 +1101,25 @@ export function App() {
         ),
       );
     },
-    [activeTaskId, pendingScheduledPrompt, preferences.notifyCompletions, tasks],
+    [activeTaskId, preferences.notifyCompletions, routineController.routines, tasks],
   );
 
   const agent = useAgentRuntime(
     workspace.path,
     activeTask.id,
     activeTask.title,
-    activeTask.threadId,
     activeTask.timeline,
+    activeTask.timelineComplete,
     activeTask.model,
-    activeTask.reasoningEffort,
-    activeTask.mode,
+    preferences.fastMode,
     activeTask.approvalPolicy,
-    activeTask.sandboxMode,
-    activeTask.goal,
     updateTaskTimeline,
     updateTaskPlan,
     updateTaskTitle,
-    updateTaskThread,
     updateTaskGoal,
     markTaskFinished,
     refresh,
-    !codexUpdate.updating,
+    !codexUpdate.updating && Boolean(executionTaskId),
   );
 
   useEffect(() => {
@@ -1077,7 +1305,7 @@ export function App() {
       return task ? [{
         id: task.id,
         title: task.title,
-        working: agent.runtime.phase === "working" && agent.runtime.taskId === task.id,
+        working: agent.isTaskWorking(task.id),
       }] : [];
     }),
     ...(draftTabOpen ? [{ id: draftTask.id, title: "New task", draft: true, working: false }] : []),
@@ -1137,8 +1365,92 @@ export function App() {
     }
   }, [agent.questionRequest, preferences.notifyApprovals]);
 
+  const changeTaskWorkspaceMode = async (workspaceMode: XiaoWorkspaceMode) => {
+    if (workspaceMode === activeTask.workspaceMode) return;
+    if (
+      !isTauriHost() ||
+      !taskStateReady ||
+      activeTaskHistoryLoading ||
+      activeEnvironmentBusy ||
+      activeTask.archived ||
+      activeTask.followUps.length > 0 ||
+      agent.runtime.phase === "working"
+    ) {
+      setEnvironmentError("The task environment cannot change while task work is active.");
+      return;
+    }
+
+    const task = { ...activeTask, meta: "Now" as const, group: "Active" as const };
+    const persistedTasks = selectedTask
+      ? tasks
+      : tasks.some((item) => item.id === task.id)
+        ? tasks
+        : [task, ...tasks];
+    const persistedState = {
+      tasks: persistedTasks,
+      activeTaskId: task.id,
+      showArchived: false,
+    };
+    setEnvironmentBusyTaskId(task.id);
+    setEnvironmentError(null);
+    if (!selectedTask) {
+      setTasks(persistedTasks);
+      setActiveTaskId(task.id);
+      setOpenTaskIds((current) => current.includes(task.id) ? current : [...current, task.id]);
+      setDraftTabOpen(false);
+    }
+
+    try {
+      await persistTaskState(workspace.path, persistedState);
+      const context = workspaceMode === "managed-worktree"
+        ? await nativeBridge.prepareXiaoManagedWorktree(workspace.path, task.id)
+        : await (async () => {
+            const records = await nativeBridge.listXiaoManagedWorktrees(workspace.path);
+            const managed = records.find((record) => record.id === task.managedWorktreeId);
+            if (!managed) throw new Error("The task's managed worktree record is unavailable.");
+            const confirmed = window.confirm(managedWorktreeCleanupMessage(managed));
+            if (!confirmed) return null;
+            return nativeBridge.removeXiaoManagedWorktree(
+              workspace.path,
+              task.id,
+              managed.id,
+              true,
+            );
+          })();
+      if (!context) return;
+      const updatedAt = Date.now();
+      const executionPatch: Partial<WorkbenchTask> = {
+        executionEnvironmentId: context.environment.id,
+        workspaceMode: context.workspaceMode,
+        managedWorktreeId: context.managedWorktree?.id ?? null,
+        updatedAt,
+        meta: "Now",
+      };
+      setTasks((current) => current.map((item) =>
+        item.id === task.id ? { ...item, ...executionPatch } : item,
+      ));
+      setDraftTask((current) =>
+        current.id === task.id ? { ...current, ...executionPatch } : current,
+      );
+      await refresh();
+    } catch (reason) {
+      setEnvironmentError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setEnvironmentBusyTaskId((current) => current === task.id ? null : current);
+    }
+  };
+
   const submitTask = async (prompt: string, attachments: Parameters<typeof agent.submit>[1]) => {
-    if (!taskStateReady) return false;
+    if (
+      !taskStateReady ||
+      activeTaskHistoryLoading ||
+      activeEnvironmentBusy ||
+      taskStateError ||
+      workspaceError
+    ) return false;
+
+    let persistedTasks = tasks;
+    let persistedActiveTaskId = activeTaskId;
     if (!selectedTask) {
       const updatedAt = Date.now();
       const materializedTask: WorkbenchTask = {
@@ -1149,36 +1461,41 @@ export function App() {
         group: "Active",
         draftText: "",
       };
-      setTasks((current) =>
-        current.some((task) => task.id === materializedTask.id)
-          ? current
-          : [materializedTask, ...current],
-      );
+      persistedTasks = tasks.some((task) => task.id === materializedTask.id)
+        ? tasks
+        : [materializedTask, ...tasks];
+      persistedActiveTaskId = materializedTask.id;
+      setTasks(persistedTasks);
       setOpenTaskIds((current) => current.includes(materializedTask.id) ? current : [...current, materializedTask.id]);
       setActiveTaskId(materializedTask.id);
       setDraftTabOpen(false);
       setDraftTask(createDraftTask(preferences.taskRunDefaults));
+    }
+    try {
+      await persistTaskState(workspace.path, {
+        tasks: persistedTasks,
+        activeTaskId: persistedActiveTaskId,
+        showArchived: false,
+      });
+    } catch {
+      return false;
     }
     return agent.submit(prompt, attachments);
   };
 
   const queueTaskFollowUp = async (prompt: string, attachments: AgentAttachment[]) => {
     const cleanPrompt = prompt.trim();
-    if (!taskStateReady || activeTask.archived || !cleanPrompt) return false;
-    const followUp = {
-      id: crypto.randomUUID(),
-      prompt: cleanPrompt,
-      attachments: attachments.map((attachment) => ({ ...attachment })),
-      createdAt: Date.now(),
-    };
-    const updatedAt = Date.now();
-    setTasks((current) => current.map((task) =>
-      task.id === activeTask.id
-        ? { ...task, followUps: [...task.followUps, followUp], updatedAt, meta: "Now" }
-        : task,
-    ));
+    if (
+      !taskStateReady ||
+      activeTaskHistoryLoading ||
+      activeEnvironmentBusy ||
+      taskStateError ||
+      workspaceError ||
+      activeTask.archived ||
+      !cleanPrompt
+    ) return false;
     setFailedFollowUpId(null);
-    return true;
+    return agent.submit(cleanPrompt, attachments);
   };
 
   const removeTaskFollowUp = (followUpId: string) => {
@@ -1192,14 +1509,21 @@ export function App() {
   };
 
   const sendTaskFollowUpNow = async (followUpId: string) => {
-    if (sendingFollowUpId) return;
+    if (
+      sendingFollowUpId ||
+      !taskStateReady ||
+      !activeTask.timelineComplete ||
+      activeEnvironmentBusy ||
+      taskStateError ||
+      workspaceError
+    ) return;
     const followUp = activeTask.followUps.find((item) => item.id === followUpId);
     if (!followUp) return;
     const taskId = activeTask.id;
     setSendingFollowUpId(followUp.id);
     setFailedFollowUpId(null);
     try {
-      const success = await agent.submit(followUp.prompt, followUp.attachments);
+      const success = await agent.submit(followUp.prompt, followUp.attachments, followUp.id);
       if (!success) {
         setFailedFollowUpId(followUp.id);
         return;
@@ -1218,49 +1542,6 @@ export function App() {
       setSendingFollowUpId((current) => current === followUp.id ? null : current);
     }
   };
-
-  useEffect(() => {
-    const followUp = activeTask.followUps[0];
-    if (
-      !taskStateReady ||
-      activeTask.archived ||
-      !followUp ||
-      agent.runtime.phase !== "ready" ||
-      agent.undoing ||
-      sendingFollowUpId ||
-      failedFollowUpId === followUp.id
-    ) return;
-
-    const taskId = activeTask.id;
-    setSendingFollowUpId(followUp.id);
-    void agent.submit(followUp.prompt, followUp.attachments).then((success) => {
-      if (!success) {
-        setFailedFollowUpId(followUp.id);
-        return;
-      }
-      setTasks((current) => current.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              followUps: task.followUps.filter((item) => item.id !== followUp.id),
-              updatedAt: Date.now(),
-              meta: "Now",
-            }
-          : task,
-      ));
-      setFailedFollowUpId((current) => current === followUp.id ? null : current);
-    }).finally(() => setSendingFollowUpId((current) => current === followUp.id ? null : current));
-  }, [
-    activeTask.archived,
-    activeTask.followUps,
-    activeTask.id,
-    agent.runtime.phase,
-    agent.submit,
-    agent.undoing,
-    failedFollowUpId,
-    sendingFollowUpId,
-    taskStateReady,
-  ]);
 
   const patchActiveTask = (patch: Partial<WorkbenchTask>) => {
     setTasks((current) =>
@@ -1305,6 +1586,44 @@ export function App() {
         [activeTask.id]: result.attachments,
       }));
     }
+  };
+
+  const forkTask = (entryId: string) => {
+    if (
+      !taskStateReady ||
+      taskStateError ||
+      !activeTask.timelineComplete ||
+      activeEnvironmentBusy ||
+      activeTask.archived ||
+      activeTask.followUps.length > 0 ||
+      agent.runtime.phase !== "ready" ||
+      agent.compacting ||
+      agent.undoing
+    ) return;
+
+    const fork = forkTaskFromEntry(
+      { ...activeTask, timeline: agent.timeline },
+      entryId,
+      { id: crypto.randomUUID(), createdAt: Date.now() },
+    );
+    if (!fork) return;
+    if (!window.confirm(
+      "Fork this task from the selected prompt?\n\nEarlier conversation history will be copied into a new task. The prompt and attachments will be restored, but workspace files will stay unchanged.",
+    )) return;
+
+    setTasks((current) => [fork.task, ...current]);
+    setOpenTaskIds((current) => [...current, fork.task.id]);
+    setActiveTaskId(fork.task.id);
+    setDraftTabOpen(false);
+    setDraftTask(createDraftTask(preferences.taskRunDefaults));
+    if (fork.attachments.length) {
+      setRestoredAttachmentsByTask((current) => ({
+        ...current,
+        [fork.task.id]: fork.attachments,
+      }));
+    }
+    setActivePage("tasks");
+    closeSidebarOnNarrow();
   };
 
   const stageReviewContext = (attachment: AgentAttachment) => {
@@ -1388,44 +1707,90 @@ export function App() {
     setFocusPanelOpen(false);
   };
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (pendingScheduledPrompt || !taskStateReady) return;
-      const due = scheduledTasks.find((task) => task.status === "pending" && task.runAt <= Date.now());
-      if (!due) return;
-      const taskId = createTask(titleFromPrompt(due.prompt));
-      if (!taskId) return;
-      setScheduledTasks((current) => current.map((task) => task.id === due.id ? { ...task, status: "running" } : task));
-      setPendingScheduledPrompt({ id: due.id, taskId, prompt: due.prompt });
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [pendingScheduledPrompt, scheduledTasks, taskStateReady]);
+  const applyRoutineBinding = (routine: RoutineSummary) => {
+    setTasks((current) => current.map((task) => task.id === routine.taskId ? {
+      ...task,
+      title: `Routine: ${routine.title}`,
+      updatedAt: Date.now(),
+      meta: "Now",
+      executionEnvironmentId: routine.executionEnvironmentId,
+      workspaceMode: routine.workspaceMode,
+      managedWorktreeId: routine.managedWorktreeId,
+    } : task));
+  };
 
-  useEffect(() => {
-    const scheduled = pendingScheduledPrompt;
-    if (!scheduled || scheduled.taskId !== activeTask.id || agent.runtime.phase !== "ready" || scheduleSubmittingRef.current === scheduled.id) return;
-    scheduleSubmittingRef.current = scheduled.id;
-    void agent.submit(scheduled.prompt, []).then((success) => {
-      if (!success) {
-        setScheduledTasks((current) => current.map((task) => task.id === scheduled.id ? { ...task, status: "failed" } : task));
-        setPendingScheduledPrompt(null);
-        scheduleSubmittingRef.current = null;
-        if (preferences.notifyErrors && "Notification" in window && Notification.permission === "granted") {
-          new Notification("Xiao could not start a scheduled task", { body: scheduled.prompt });
+  const createRoutine = async (draft: RoutineDraft) => {
+    if (!isTauriHost() || !taskStateReady || taskWorkspacePath !== workspace.path) {
+      throw new Error("The workspace must finish loading before a routine can be created.");
+    }
+    const taskTitle = draft.title || titleFromPrompt(draft.prompt);
+    const routineTask: WorkbenchTask = {
+      ...createDraftTask(preferences.taskRunDefaults),
+      title: `Routine: ${taskTitle}`,
+    };
+    const nextTasks = [routineTask, ...tasks];
+    setTasks(nextTasks);
+    await persistTaskState(workspace.path, {
+      tasks: nextTasks,
+      activeTaskId,
+      showArchived: false,
+    });
+    try {
+      const routineModel = routineTask.model
+        ? agent.models.find((model) => model.model === routineTask.model)
+        : agent.models.find((model) => model.isDefault);
+      const routine = await routineController.create({
+        projectPath: workspace.path,
+        taskId: routineTask.id,
+        ...draft,
+        serviceTier: serviceTierForFastMode(routineModel, preferences.fastMode),
+      });
+      applyRoutineBinding(routine);
+    } catch (reason) {
+      const latest = latestTaskStateRef.current;
+      if (latest?.path === workspace.path) {
+        const rollbackState = {
+          ...latest.state,
+          tasks: latest.state.tasks.filter((task) => task.id !== routineTask.id),
+        };
+        try {
+          await persistTaskState(workspace.path, rollbackState);
+          setTasks((current) => current.filter((task) => task.id !== routineTask.id));
+        } catch {
+          // Keep the task visible if native ownership prevents safe rollback.
         }
       }
-    });
-  }, [activeTask.id, agent, pendingScheduledPrompt, preferences.notifyErrors]);
+      throw reason;
+    }
+  };
 
-  const scheduleTask = (prompt: string, runAt: number) => {
-    setScheduledTasks((current) => [...current, { id: crypto.randomUUID(), prompt, runAt, status: "pending" }]);
-    if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+  const updateRoutine = async (routineId: string, draft: RoutineDraft) => {
+    if (taskStateReady && taskWorkspacePath === workspace.path) {
+      await persistTaskState(workspace.path, {
+        tasks,
+        activeTaskId,
+        showArchived: false,
+      });
+    }
+    const currentRoutine = routineController.routines.find((routine) => routine.id === routineId);
+    const routineTask = tasks.find((task) => task.id === currentRoutine?.taskId);
+    const modelId = routineTask ? routineTask.model : currentRoutine?.model;
+    const routineModel = modelId
+      ? agent.models.find((model) => model.model === modelId)
+      : agent.models.find((model) => model.isDefault);
+    const routine = await routineController.update({
+      routineId,
+      ...draft,
+      serviceTier: serviceTierForFastMode(routineModel, preferences.fastMode),
+    });
+    applyRoutineBinding(routine);
   };
 
   const setTaskArchived = async (taskId: string, archived: boolean) => {
     if (
       !taskStateReady ||
-      (agent.runtime.phase === "working" && agent.runtime.taskId === taskId)
+      environmentBusyTaskId === taskId ||
+      agent.isTaskWorking(taskId)
     ) return;
     const target = tasks.find((task) => task.id === taskId);
     if (target?.origin === "codex" && target.threadId) {
@@ -1508,7 +1873,8 @@ export function App() {
     const source = tasks.find((task) => task.id === taskId);
     if (!source) return;
     const createdAt = Date.now();
-    const task: WorkbenchTask = {
+    if (!source.timelineComplete) return;
+    const task: WorkbenchTask = completeTimelineMetadata({
       ...source,
       id: crypto.randomUUID(),
       title: `Continue: ${source.title}`,
@@ -1520,12 +1886,16 @@ export function App() {
       draftText: "",
       followUps: [],
       threadId: null,
+      threadBinding: null,
+      executionEnvironmentId: null,
+      workspaceMode: "local",
+      managedWorktreeId: null,
       goal: null,
       meta: "Now",
-      group: "Active",
+      group: "Active" as const,
       timeline: source.timeline.map((entry) => ({ ...entry })),
       plan: source.plan ? { ...source.plan, steps: source.plan.steps.map((step) => ({ ...step })) } : null,
-    };
+    });
     setTasks((current) => [task, ...current]);
     setActiveTaskId(task.id);
     setActivePage("tasks");
@@ -1574,7 +1944,7 @@ export function App() {
       };
       try {
         if (isTauriHost()) {
-          await enqueueDocumentSave(documentFromState(workspace.path, nextState));
+          await persistTaskState(workspace.path, nextState);
         } else {
           window.localStorage.setItem(taskStorageKey(workspace.path), JSON.stringify(nextState));
         }
@@ -1595,17 +1965,17 @@ export function App() {
     if (!isTauriHost()) return;
 
     try {
-      const document = await nativeBridge.loadXiaoWorkspace(path);
+      const document = await nativeBridge.loadXiaoWorkspace(path, false);
       if (!document) return;
       const nextTasks = document.tasks.map((task) =>
         task.archived ? task : { ...task, archived: true, pinned: false, updatedAt },
       );
-      await enqueueDocumentSave({
+      await enqueueWorkspaceSave(updateFromDocument({
         ...document,
         activeTaskId: null,
         tasks: nextTasks,
         showArchived: false,
-      });
+      }));
       setProjects((current) =>
         current.map((project) =>
           project.path === path ? { ...project, updatedAt } : project,
@@ -1617,7 +1987,7 @@ export function App() {
   };
 
   const removeProject = (path: string) => {
-    if (workspace.path === path && agent.runtime.phase === "working") return;
+    if (workspace.path === path && agent.hasActiveRuns) return;
     const fallback = projects.find((project) => project.path !== path);
     updateProjectPreference(path, { hidden: true });
     if (workspace.path === path && fallback) {
@@ -1668,7 +2038,7 @@ export function App() {
         const documents = await Promise.all(
           otherProjects.map(async (project) => ({
             project,
-            document: await nativeBridge.loadXiaoWorkspace(project.path),
+            document: await nativeBridge.loadXiaoWorkspace(project.path, false),
           })),
         );
         for (const { project, document } of documents) {
@@ -1725,13 +2095,13 @@ export function App() {
     if (!isTauriHost()) return;
 
     try {
-      const document = await nativeBridge.loadXiaoWorkspace(item.projectPath);
+      const document = await nativeBridge.loadXiaoWorkspace(item.projectPath, false);
       if (!document) return;
       const updatedAt = Date.now();
       const tasks = document.tasks.map((task) =>
         task.id === item.taskId ? { ...task, archived: false, updatedAt } : task,
       );
-      await enqueueDocumentSave({ ...document, tasks, showArchived: false });
+      await enqueueWorkspaceSave(updateFromDocument({ ...document, tasks, showArchived: false }));
       setArchivedTasks((current) =>
         current.filter(
           (task) => task.projectPath !== item.projectPath || task.taskId !== item.taskId,
@@ -1748,7 +2118,7 @@ export function App() {
   };
 
   const addProject = async () => {
-    if (agent.runtime.phase === "working") return;
+    if (agent.hasActiveRuns) return;
     if (!isTauriHost()) return;
     const selected = await open({ directory: true, multiple: false, title: "Add a project to Xiao" });
     if (typeof selected !== "string") return;
@@ -1827,7 +2197,7 @@ export function App() {
             update={codexUpdate.status?.updateAvailable && codexUpdate.status.canUpdate ? {
               version: codexUpdate.status.latestVersion,
               installing: codexUpdate.updating,
-              disabled: codexUpdate.updating || agent.runtime.phase === "working" || agent.runtime.phase === "starting",
+              disabled: codexUpdate.updating || agent.hasActiveRuns || agent.runtime.phase === "starting",
               onInstall: () => {
                 void codexUpdate.install().then((result) => {
                   if (result) void refresh();
@@ -1844,9 +2214,9 @@ export function App() {
             tasks={tasks}
             activeTaskId={selectedTask?.id ?? ""}
             workspace={workspace}
-            runtime={agent.runtime}
+            workingTaskIds={agent.workingTaskIds}
             account={agent.account}
-            rateLimits={agent.rateLimits}
+            rateLimits={null}
             codexThreads={preferences.importCodexHistory ? codexThreads : []}
             threadTokenUsage={threadTokenUsage}
             threadChangeSummaries={threadChangeSummaries}
@@ -1870,7 +2240,7 @@ export function App() {
             }}
             onAddProject={() => void addProject()}
             onSelectProject={(path) => {
-              if (agent.runtime.phase === "working") return;
+              if (agent.hasActiveRuns) return;
               openProjectWithoutTaskRef.current = true;
               setActiveProjectPath(path);
               setActivePage("tasks");
@@ -1955,18 +2325,25 @@ export function App() {
           ) : (
             <TaskWorkspace
               taskId={activeTask.id}
+              executionTaskId={executionTaskId}
               taskTitle={activeTask.title}
               taskArchived={activeTask.archived}
               launchMode={focusedLaunch}
               taskStateError={taskStateError}
+              taskStateLoading={activeTaskHistoryLoading}
               timeline={agent.timeline}
               runtime={agent.runtime}
+              latestRun={agent.latestRun}
               models={visibleModels}
               selectedModel={activeTask.model}
               selectedReasoningEffort={activeTask.reasoningEffort}
+              fastMode={preferences.fastMode}
               mode={activeTask.mode}
               approvalPolicy={activeTask.approvalPolicy}
               sandboxMode={activeTask.sandboxMode}
+              workspaceMode={activeTask.workspaceMode}
+              environmentBusy={activeEnvironmentBusy}
+              environmentError={environmentError ?? workspaceError}
               goal={activeTask.goal}
               plan={activeTask.plan}
               reviewContext={pendingReviewContext}
@@ -1987,6 +2364,7 @@ export function App() {
               showChatExport={preferences.showChatExport}
               historyHasMore={Boolean(activeTask.historyCursor)}
               historyLoadingOlder={Boolean(activeTask.historyLoadingOlder)}
+              launchBrand={preferences.launchBrand}
               workspace={workspace}
               onModelChange={(model) => {
                 patchActiveTask({ model, reasoningEffort: null });
@@ -1996,6 +2374,7 @@ export function App() {
                 patchActiveTask({ reasoningEffort });
                 updateTaskRunDefaults({ reasoningEffort });
               }}
+              onFastModeChange={(fastMode) => updatePreferences({ fastMode })}
               onModeChange={(mode) => {
                 patchActiveTask({ mode });
                 updateTaskRunDefaults({ mode });
@@ -2009,9 +2388,11 @@ export function App() {
                 patchActiveTask({ sandboxMode });
                 updateTaskRunDefaults({ sandboxMode });
               }}
+              onWorkspaceModeChange={changeTaskWorkspaceMode}
               onGoalSet={agent.setGoal}
               onGoalClear={agent.clearGoal}
               onInterrupt={agent.interrupt}
+              onRetryRun={(runId) => { void agent.retryRun(runId); }}
               onSubmit={submitTask}
               onQueueFollowUp={queueTaskFollowUp}
               onRemoveFollowUp={removeTaskFollowUp}
@@ -2025,6 +2406,7 @@ export function App() {
               })}
               onCompact={agent.compact}
               onUndo={() => void undoTaskTurn()}
+              onForkTask={forkTask}
               onRemoveReviewContext={removeReviewContext}
               onReviewContextSent={clearReviewContext}
               onResolveQuestion={agent.resolveQuestion}
@@ -2048,18 +2430,36 @@ export function App() {
               system={system}
               runtime={agent.runtime}
               task={activeTask}
+              executionTaskId={executionTaskId}
+              executionTransitioning={activeEnvironmentBusy}
               timeline={agent.timeline}
               models={agent.models}
               contextUsage={agent.contextUsage}
               plan={activeTask.plan}
               runtimeLogs={agent.runtimeLogs}
-              loading={loading}
+              loading={loading || activeEnvironmentBusy}
               error={workspaceError}
               onRefresh={refresh}
               onLoadDirectory={loadDirectory}
-              scheduledTasks={scheduledTasks}
-              onScheduleTask={scheduleTask}
-              onRemoveScheduledTask={(id) => setScheduledTasks((current) => current.filter((task) => task.id !== id))}
+              routines={routineController.routines}
+              routinesLoading={routineController.loading}
+              routinesError={routineController.error}
+              routineCreating={routineController.creating}
+              routineBusyIds={routineController.busyIds}
+              routineOpenRunId={routineOpenTarget?.runId ?? null}
+              nativeRoutinesAvailable={isTauriHost()}
+              dangerousRoutineAccessDefault={preferences.taskRunDefaults.sandboxMode === "danger-full-access"}
+              dangerousRoutineIds={dangerousRoutineIds}
+              onCreateRoutine={createRoutine}
+              onUpdateRoutine={updateRoutine}
+              onSetRoutineEnabled={async (routineId, enabled) => {
+                await routineController.setEnabled(routineId, enabled);
+              }}
+              onRunRoutineNow={async (routineId) => {
+                await routineController.runNow(routineId);
+              }}
+              onDeleteRoutine={routineController.remove}
+              onClearRoutineError={routineController.clearError}
               reviewContext={pendingReviewContext}
               onStageReviewContext={stageReviewContext}
               onRemoveReviewContext={removeReviewContext}

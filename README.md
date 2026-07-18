@@ -1,6 +1,10 @@
-# Xiao Workbench
+<p align="center">
+  <img src="src-tauri/icons/app-icon.png" alt="Xiao Workbench mushroom logo" width="180" />
+</p>
 
-**Windows beta · 0.0.0day07152026**
+<h1 align="center">Xiao Workbench</h1>
+
+<p align="center"><strong>Windows beta · 0.0.0day07162026</strong></p>
 
 Xiao is a calm desktop desk for noisy agent work. The conversation stays in the
 middle; the plan, files, changes, terminal, browser, and the occasional break
@@ -65,6 +69,14 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
+## Contributing
+
+Active development happens on the
+[`dev`](https://github.com/ryan-mt/xiao-workbench/tree/dev) branch. Create
+feature branches from `dev` and target pull requests back to `dev`, not `main`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, verification, and pull request
+guidance.
+
 ## A beta, honestly
 
 Xiao is usable, but this is still the first public beta. Native WebViews,
@@ -76,3 +88,8 @@ far more useful than a perfect bug-report template.
 Xiao does not add its own analytics. Websites opened in the browser keep their
 own privacy policies, and Codex follows the account and configuration of your
 local Codex installation.
+
+## License
+
+Xiao Workbench is open-source software available under the
+[MIT License](LICENSE).

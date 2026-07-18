@@ -8,6 +8,7 @@ import type { FileNode, WorkspaceSnapshot } from "../../../core/models/workspace
 
 type OpenFilePanelProps = {
   workspace: WorkspaceSnapshot;
+  taskId: string | null;
   loading: boolean;
   activeFile: string | null;
   onActiveFileChange: (path: string | null) => void;
@@ -134,6 +135,7 @@ const highlightLine = (line: string, extension: string): ReactNode => {
 
 export function OpenFilePanel({
   workspace,
+  taskId,
   loading,
   activeFile,
   onActiveFileChange,
@@ -153,14 +155,14 @@ export function OpenFilePanel({
   const [comment, setComment] = useState("");
   const [stagedNotice, setStagedNotice] = useState<string | null>(null);
   const [visibleLines, setVisibleLines] = useState(1200);
-  const workspacePathRef = useRef(workspace.path);
+  const executionRootRef = useRef(workspace.execution.executionRoot);
   const fileRequestId = useRef(0);
 
   const lines = useMemo(() => content?.replace(/\r\n?/g, "\n").split("\n") ?? [], [content]);
   const extension = activeFile?.split(".").at(-1) ?? "text";
 
   useEffect(() => {
-    workspacePathRef.current = workspace.path;
+    executionRootRef.current = workspace.execution.executionRoot;
     fileRequestId.current += 1;
     setChildrenByPath(new Map());
     setLoadingPaths(new Set());
@@ -172,22 +174,22 @@ export function OpenFilePanel({
     setStagedNotice(null);
     setVisibleLines(1200);
     onActiveFileChange(null);
-  }, [workspace.path]);
+  }, [onActiveFileChange, taskId, workspace.execution.executionRoot]);
 
   const loadNode = async (node: FileNode) => {
     if (childrenByPath.has(node.path) || loadingPaths.has(node.path)) return;
-    const workspacePath = workspace.path;
+    const executionRoot = workspace.execution.executionRoot;
     setLoadingPaths((current) => new Set(current).add(node.path));
     setTreeError(null);
     try {
       const children = await onLoadDirectory(node.path);
-      if (workspacePathRef.current !== workspacePath) return;
+      if (executionRootRef.current !== executionRoot) return;
       setChildrenByPath((current) => new Map(current).set(node.path, children));
     } catch (reason) {
-      if (workspacePathRef.current !== workspacePath) return;
+      if (executionRootRef.current !== executionRoot) return;
       setTreeError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      if (workspacePathRef.current === workspacePath) {
+      if (executionRootRef.current === executionRoot) {
         setLoadingPaths((current) => {
           const next = new Set(current);
           next.delete(node.path);
@@ -199,7 +201,7 @@ export function OpenFilePanel({
 
   const openFile = async (node: FileNode) => {
     const requestId = ++fileRequestId.current;
-    const workspacePath = workspace.path;
+    const executionRoot = workspace.execution.executionRoot;
     onActiveFileChange(node.path);
     setFileLoading(true);
     setContent(null);
@@ -209,11 +211,11 @@ export function OpenFilePanel({
     setStagedNotice(null);
     setVisibleLines(1200);
     try {
-      const nextContent = await nativeBridge.readWorkspaceFile(workspacePath, node.path);
-      if (requestId !== fileRequestId.current || workspacePathRef.current !== workspacePath) return;
+      const nextContent = await nativeBridge.readWorkspaceFile(workspace.path, taskId, node.path);
+      if (requestId !== fileRequestId.current || executionRootRef.current !== executionRoot) return;
       setContent(nextContent);
     } catch (reason) {
-      if (requestId !== fileRequestId.current || workspacePathRef.current !== workspacePath) return;
+      if (requestId !== fileRequestId.current || executionRootRef.current !== executionRoot) return;
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       if (requestId === fileRequestId.current) setFileLoading(false);
@@ -265,7 +267,7 @@ export function OpenFilePanel({
       <aside className="open-file-browser">
         <header>
           <strong>{workspace.name}</strong>
-          <small>{workspace.path}</small>
+          <small>{workspace.execution.executionRoot}</small>
         </header>
         <label className="open-file-search">
           <XiaoIcon name="search" size={14} />

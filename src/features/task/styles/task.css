@@ -38,6 +38,13 @@
   user-select: none;
 }
 
+.task-launch__logo {
+  display: block;
+  width: clamp(64px, 7vw, 88px);
+  height: clamp(64px, 7vw, 88px);
+  object-fit: contain;
+}
+
 .task-launch__wordmark {
   display: flex;
   align-items: center;
@@ -76,7 +83,7 @@
 .task-launch__brand small {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 520;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -163,6 +170,22 @@
   font-weight: 590;
   letter-spacing: -0.02em;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-header__context-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-header__environment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--text-micro);
   white-space: nowrap;
 }
 
@@ -284,6 +307,13 @@
 @keyframes timeline-switch-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.timeline__history-loading {
+  padding: 2px 0 20px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .timeline__empty {
@@ -459,6 +489,44 @@
   line-height: 1.55;
   text-wrap: pretty;
   white-space: pre-wrap;
+}
+
+.activity__user-actions {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.activity--user-message:hover .activity__user-actions,
+.activity--user-message:focus-within .activity__user-actions {
+  opacity: 1;
+}
+
+.activity__user-actions button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-micro);
+  cursor: pointer;
+}
+
+.activity__user-actions button:hover,
+.activity__user-actions button:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text-soft);
+  outline: none;
+}
+
+@media (hover: none) {
+  .activity__user-actions { opacity: 1; }
 }
 
 .activity__review-comments {
@@ -2149,7 +2217,7 @@
 .plan-dock__list li > small {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 560;
 }
 
@@ -2175,7 +2243,7 @@
 
 .plan-dock__check b {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 560;
 }
 
@@ -3147,6 +3215,14 @@
   gap: 8px;
   color: var(--muted-strong);
 }
+
+.composer-add__settings > small {
+  color: var(--muted);
+  font-size: var(--text-micro);
+  line-height: 1.4;
+}
+
+.composer-add__settings > small.is-error { color: var(--danger); }
 
 .composer__tools-left .composer-add__settings select {
   width: 100%;

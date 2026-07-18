@@ -221,7 +221,7 @@
   border-radius: 6px;
   background: var(--surface-strong);
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: var(--text-micro);
 }
 
 .title-bar__update:hover:not(:disabled) {
@@ -237,7 +237,7 @@
 .title-bar__update small {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--text-micro);
 }
 
 .window-controls {
@@ -782,7 +782,7 @@
 
 .sidebar-project__title strong {
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--text-label);
   font-weight: 590;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -893,7 +893,7 @@
   border-radius: 7px;
   background: var(--surface-raised);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--text-label);
   font-weight: 560;
 }
 
@@ -984,7 +984,7 @@
 .task-list__title {
   display: block;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--text-label);
   font-weight: 500;
   line-height: 17px;
   text-overflow: ellipsis;
@@ -1028,7 +1028,7 @@
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--text-label);
   outline: none;
 }
 .task-list__rename input:focus { border-color: var(--muted); box-shadow: 0 0 0 2px color-mix(in srgb, var(--text) 7%, transparent); }
@@ -1658,7 +1658,7 @@
   border-radius: 9px;
   background: var(--text);
   color: var(--canvas);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 680;
   letter-spacing: .04em;
   overflow: hidden;
@@ -1781,7 +1781,7 @@
 
 .project-actions-menu button span {
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--text-label);
   font-weight: 480;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1810,7 +1810,7 @@
   padding: 0 9px;
   border-radius: 7px;
   color: var(--text-soft);
-  font-size: 12.5px;
+  font-size: var(--text-label);
   text-align: left;
 }
 .global-context-menu button:hover,

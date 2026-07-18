@@ -29,7 +29,7 @@
   padding: 0 13px;
   border: 1px solid transparent;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: var(--text-label);
   font-weight: 560;
   white-space: nowrap;
   transition: transform 120ms ease, background 160ms ease, border-color 160ms ease,

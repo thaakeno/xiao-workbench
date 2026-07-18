@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -37,9 +39,32 @@ pub enum GitFileStatus {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub current: bool,
+    pub remote: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitWorktree {
     pub path: String,
     pub branch: String,
     pub head: String,
     pub is_main: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GitRepositoryIdentity {
+    pub repository_root: PathBuf,
+    pub common_dir: PathBuf,
+    pub workspace_relative: PathBuf,
+    pub head: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GitWorktreeEvidence {
+    pub path: PathBuf,
+    pub branch: String,
+    pub head: String,
 }

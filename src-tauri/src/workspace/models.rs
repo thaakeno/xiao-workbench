@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::execution::models::ExecutionContext;
 use crate::git::models::GitSummary;
 
 #[derive(Debug, Serialize)]
@@ -23,6 +24,7 @@ pub enum FileKind {
 pub struct WorkspaceSnapshot {
     pub name: String,
     pub path: String,
+    pub execution: ExecutionContext,
     pub files: Vec<FileNode>,
     pub git: Option<GitSummary>,
 }

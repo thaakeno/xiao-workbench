@@ -4,10 +4,10 @@
   --font-display: "Segoe UI Variable Display", "Segoe UI Variable Text", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 
-  --text-micro: 10px;
-  --text-caption: 11px;
-  --text-label: 12px;
-  --text-body: 13px;
+  --text-micro: 11px;
+  --text-caption: 12px;
+  --text-label: 13px;
+  --text-body: 14px;
 
   --bg: #f7f7f5;
   --chrome: #f3f3f1;

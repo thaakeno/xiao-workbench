@@ -20,6 +20,8 @@ export type AppPreferences = {
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
   focusNewTasks: boolean;
+  fastMode: boolean;
+  launchBrand: "logo" | "wordmark";
   wrapCode: boolean;
   notifyCompletions: boolean;
   notifyErrors: boolean;
@@ -44,6 +46,8 @@ const defaults: AppPreferences = {
   showReasoningSummaries: true,
   expandToolOutput: false,
   focusNewTasks: true,
+  fastMode: false,
+  launchBrand: "logo",
   wrapCode: false,
   notifyCompletions: true,
   notifyErrors: true,
@@ -93,6 +97,11 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
     expandToolOutput:
       typeof stored.expandToolOutput === "boolean" ? stored.expandToolOutput : defaults.expandToolOutput,
     focusNewTasks: typeof stored.focusNewTasks === "boolean" ? stored.focusNewTasks : defaults.focusNewTasks,
+    fastMode: typeof stored.fastMode === "boolean" ? stored.fastMode : defaults.fastMode,
+    launchBrand:
+      stored.launchBrand === "logo" || stored.launchBrand === "wordmark"
+        ? stored.launchBrand
+        : defaults.launchBrand,
     wrapCode: typeof stored.wrapCode === "boolean" ? stored.wrapCode : defaults.wrapCode,
     notifyCompletions:
       typeof stored.notifyCompletions === "boolean" ? stored.notifyCompletions : defaults.notifyCompletions,

@@ -24,4 +24,13 @@ describe("toBrowserUrl", () => {
       "https://www.google.com/search?q=javascript%3Aalert(1)",
     );
   });
+
+  it("searches malformed hosts instead of throwing while adding a scheme", () => {
+    expect(toBrowserUrl("999.999.999.999")).toBe(
+      "https://www.google.com/search?q=999.999.999.999",
+    );
+    expect(toBrowserUrl("example.com:99999")).toBe(
+      "https://www.google.com/search?q=example.com%3A99999",
+    );
+  });
 });

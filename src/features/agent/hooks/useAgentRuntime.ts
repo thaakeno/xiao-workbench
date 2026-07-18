@@ -9,13 +9,10 @@ import type {
   AgentApprovalPolicy,
   AgentGoal,
   AgentMessage,
-  AgentMode,
   AgentModelSummary,
   AgentPlan,
   AgentQuestionRequest,
-  AgentRateLimits,
   AgentRuntimeState,
-  AgentSandboxMode,
   AgentTurnOutcome,
   AgentUndoResult,
   RuntimeLogEntry,
@@ -24,26 +21,52 @@ import type {
   TimelineEntry,
   XiaoHistoryItem,
 } from "../../../core/models/agent";
+import type {
+  PendingInputSnapshot,
+  RunEventRecord,
+  RunProtocolEnvelope,
+  RunStatus,
+  RunUpdateEnvelope,
+} from "../../../core/models/run";
 import { useCodexUsage } from "../../profile/hooks/useCodexUsage";
 import {
   approvalResponse,
   contextCompactionTimelineEntry,
-  mcpElicitationDeclineResponse,
-  needsAgentSession,
+  invalidateUndoHistory,
+  latestUndoableTurn,
   permissionGrantFromRequest,
+  reconcilePendingApprovalEntries,
+  reviewContextText,
+  serviceTierForFastMode,
   threadCompactRequest,
+  userInput,
 } from "./agentProtocol";
+import {
+  acceptRunProtocol,
+  activePendingInputIdsForRestore,
+  activeRunForTask,
+  emptyRunProjection,
+  latestRunForTask,
+  mergeListedRunSnapshots,
+  projectRunSnapshots,
+  projectRunUpdate,
+  runStatusIsActive,
+  shouldRestorePendingInput,
+  type RunProjection,
+} from "./runProjection";
 
 const MAX_RUNTIME_LOGS = 240;
-const RATE_LIMIT_SNAPSHOT_KEY = "xiao.rate-limit-snapshot.v1";
-const MAX_PERSISTED_TOOL_OUTPUT = 32_000;
-const MAX_PERSISTED_PATCH = 40_000;
-const PLAN_PROGRESS_INSTRUCTIONS =
-  "When you publish a task plan with update_plan, keep it current throughout execution. " +
-  "As soon as a step finishes, mark it completed and set the next step to in_progress before continuing. " +
-  "Do not wait until the final response to batch plan status changes.";
-
-type TurnStartResponse = { turn?: { id?: string } };
+type RuntimeMessageEnvelope = {
+  environmentId: string;
+  generation: number;
+  message: AgentMessage;
+};
+type RuntimeDiagnosticEnvelope = {
+  environmentId: string;
+  generation: number;
+  message: string;
+};
+type RuntimeStoppedEnvelope = { environmentId: string; generation: number };
 
 const initialRuntime: AgentRuntimeState = {
   phase: "offline",
@@ -111,6 +134,8 @@ const readExplorationActions = (item: Record<string, unknown>) => {
 const readQuestionRequest = (
   message: AgentMessage,
   taskId: string,
+  pendingInputId: string,
+  runId: string,
 ): AgentQuestionRequest | null => {
   if (message.id == null || !Array.isArray(message.params?.questions)) return null;
   const questions = message.params.questions.flatMap((rawQuestion) => {
@@ -146,6 +171,8 @@ const readQuestionRequest = (
   const autoResolutionMs = message.params.autoResolutionMs;
   return {
     requestId: message.id,
+    pendingInputId,
+    runId,
     taskId,
     threadId: typeof message.params.threadId === "string" ? message.params.threadId : "",
     turnId: typeof message.params.turnId === "string" ? message.params.turnId : "",
@@ -157,6 +184,52 @@ const readQuestionRequest = (
   };
 };
 
+const messageFromPendingInput = (pending: PendingInputSnapshot): AgentMessage => {
+  let requestId: number | string = pending.requestId;
+  try {
+    const parsed = JSON.parse(pending.requestId) as unknown;
+    if (typeof parsed === "number" || typeof parsed === "string") requestId = parsed;
+  } catch {
+    // Keep the canonical string when an older row is not JSON encoded.
+  }
+  const method = pending.kind === "command_approval"
+    ? "item/commandExecution/requestApproval"
+    : pending.kind === "file_approval"
+      ? "item/fileChange/requestApproval"
+      : pending.kind === "permissions"
+        ? "item/permissions/requestApproval"
+        : pending.kind === "question"
+          ? "item/tool/requestUserInput"
+          : "mcpServer/elicitation/request";
+  const summary = pending.safeSummary && typeof pending.safeSummary === "object"
+    ? pending.safeSummary as Record<string, unknown>
+    : {};
+  return {
+    id: requestId,
+    method,
+    params: {
+      ...summary,
+      threadId: pending.threadId,
+      turnId: pending.turnId,
+      itemId: pending.itemId,
+    },
+  };
+};
+
+const messageFromRunEvent = (event: RunEventRecord): AgentMessage | null => {
+  if (!event.safePayload || typeof event.safePayload !== "object") return null;
+  if (event.eventType.startsWith("agent.")) return event.safePayload as AgentMessage;
+  const protocol = (event.safePayload as Record<string, unknown>).protocol;
+  return protocol && typeof protocol === "object" ? protocol as AgentMessage : null;
+};
+
+const timelineStatusForRun = (status: RunStatus): TimelineEntry["status"] => {
+  if (status === "completed") return "success";
+  if (status === "failed" || status === "cancelled") return "error";
+  if (status === "interrupted" || status === "needs_attention") return "warning";
+  return "active";
+};
+
 const countDiffLines = (diff: string) => {
   let additions = 0;
   let deletions = 0;
@@ -165,11 +238,6 @@ const countDiffLines = (diff: string) => {
     if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
   }
   return { additions, deletions };
-};
-
-const boundedPersistedText = (value: unknown, limit: number) => {
-  if (typeof value !== "string") return undefined;
-  return value.length <= limit ? value : `${value.slice(0, limit)}\n\n[Output truncated by Xiao]`;
 };
 
 const readTokenUsage = (value: unknown): TokenUsageBreakdown | null => {
@@ -249,7 +317,7 @@ export const timelineEntryFromItem = (
         createdAt,
         title: commandStatus === "inProgress" ? "Exploring workspace" : failed ? "Exploration failed" : "Explored workspace",
         command: typeof item.command === "string" ? item.command : undefined,
-        body: boundedPersistedText(item.aggregatedOutput, MAX_PERSISTED_TOOL_OUTPUT),
+        body: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : undefined,
         meta: typeof item.cwd === "string" ? item.cwd : "Workspace",
         status: commandStatus === "inProgress" ? "active" : failed ? "error" : "success",
         exploration,
@@ -266,7 +334,7 @@ export const timelineEntryFromItem = (
             ? "Command did not complete"
             : "Command completed",
       command: typeof item.command === "string" ? item.command : "Running command",
-      body: boundedPersistedText(item.aggregatedOutput, MAX_PERSISTED_TOOL_OUTPUT),
+      body: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : undefined,
       meta: typeof item.cwd === "string" ? item.cwd : "Workspace",
       status: commandStatus === "inProgress" ? "active" : failed ? "error" : "success",
     };
@@ -277,7 +345,7 @@ export const timelineEntryFromItem = (
       if (!change || typeof change !== "object") return [];
       const value = change as Record<string, unknown>;
       if (typeof value.path !== "string") return [];
-      const patch = boundedPersistedText(value.diff, MAX_PERSISTED_PATCH);
+      const patch = typeof value.diff === "string" ? value.diff : undefined;
       const stats = countDiffLines(patch ?? "");
       return [{ path: value.path, ...stats, patch }];
     });
@@ -308,18 +376,9 @@ export const timelineEntryFromItem = (
             typeof (item.error as Record<string, unknown>).message === "string"
           ? String((item.error as Record<string, unknown>).message)
           : null;
-    const argumentText = item.arguments && typeof item.arguments === "object"
-      ? JSON.stringify(item.arguments)
-      : typeof item.arguments === "string" ? item.arguments : "";
-    const normalizedTool = tool.toLocaleLowerCase();
-    const kind = normalizedTool.includes("search")
-      ? "search"
-      : normalizedTool.includes("read") || normalizedTool.includes("get") || normalizedTool.includes("list")
-        ? "read"
-        : "command";
     return {
       id,
-      kind: "explore",
+      kind: "command",
       createdAt,
       title: `${server} · ${tool}`,
       body:
@@ -330,25 +389,17 @@ export const timelineEntryFromItem = (
             : JSON.stringify(item.result, null, 2).slice(0, 8_000),
       meta: "Plugin tool",
       status: failed ? "error" : item.status === "inProgress" ? "active" : "success",
-      exploration: [{
-        kind,
-        command: argumentText || `${server}.${tool}`,
-        label: `${server} · ${tool}`,
-        query: kind === "search" ? argumentText : undefined,
-      }],
     };
   }
 
   if (item.type === "webSearch") {
-    const query = typeof item.query === "string" ? item.query : "Web search";
     return {
       id,
-      kind: "explore",
+      kind: "result",
       createdAt,
-      title: `Searched: ${query}`,
+      title: typeof item.query === "string" ? `Searched: ${item.query}` : "Web search",
       meta: "Browser tool",
       status: "success",
-      exploration: [{ kind: "web", command: query, label: query, query }],
     };
   }
 
@@ -376,19 +427,6 @@ export const timelineEntryFromItem = (
   return null;
 };
 
-const reviewContextText = (attachment: AgentAttachment) => {
-  const start = attachment.lineStart;
-  const end = attachment.lineEnd ?? start;
-  const lines = start ? `:${start}${end && end !== start ? `-${end}` : ""}` : "";
-  return [
-    `[Review comment on ${attachment.path}${lines}]`,
-    attachment.preview,
-    attachment.comment ? `Comment: ${attachment.comment}` : undefined,
-  ]
-    .filter(Boolean)
-    .join("\n");
-};
-
 const historyFromTimeline = (timeline: TimelineEntry[]): XiaoHistoryItem[] =>
   timeline.flatMap<XiaoHistoryItem>((entry) => {
     if (entry.kind === "user" && entry.title.trim()) {
@@ -404,34 +442,6 @@ const historyFromTimeline = (timeline: TimelineEntry[]): XiaoHistoryItem[] =>
     return [];
   });
 
-const userInput = (prompt: string, attachments: AgentAttachment[]) => [
-  { type: "text", text: prompt, text_elements: [] },
-  ...attachments.map((attachment) => {
-    if (attachment.kind === "review") {
-      return { type: "text", text: reviewContextText(attachment), text_elements: [] };
-    }
-    if (attachment.kind === "image" && attachment.url) {
-      return { type: "image", url: attachment.url };
-    }
-    if (attachment.kind === "image") {
-      return { type: "localImage", path: attachment.path };
-    }
-    return { type: "mention", name: attachment.name, path: attachment.path };
-  }),
-];
-
-const sandboxPolicyForTurn = (mode: AgentSandboxMode, workspacePath: string) => {
-  if (mode === "danger-full-access") return { type: "dangerFullAccess" };
-  if (mode === "read-only") return { type: "readOnly" };
-  return {
-    type: "workspaceWrite",
-    writableRoots: [workspacePath],
-    networkAccess: false,
-    excludeTmpdirEnvVar: false,
-    excludeSlashTmp: false,
-  };
-};
-
 export const titleFromPrompt = (prompt: string) => {
   const singleLine = prompt.replace(/\s+/g, " ").trim();
   if (singleLine.length <= 56) return singleLine;
@@ -443,18 +453,14 @@ export function useAgentRuntime(
   workspacePath: string,
   activeTaskId: string,
   activeTaskTitle: string,
-  activeTaskThreadId: string | null,
   activeTaskTimeline: TimelineEntry[],
+  activeTaskTimelineComplete: boolean,
   activeTaskModel: string | null,
-  activeTaskReasoningEffort: string | null,
-  activeTaskMode: AgentMode,
+  fastMode: boolean,
   activeTaskApprovalPolicy: AgentApprovalPolicy,
-  activeTaskSandboxMode: AgentSandboxMode,
-  activeTaskGoal: AgentGoal | null,
   onTimelineChange: (taskId: string, timeline: TimelineEntry[]) => void,
   onPlanChange: (taskId: string, plan: AgentPlan | null) => void,
   onTaskTitleChange: (taskId: string, title: string) => void,
-  onTaskThreadChange: (taskId: string, threadId: string) => void,
   onTaskGoalChange: (taskId: string, goal: AgentGoal | null) => void,
   onTaskFinished: (taskId: string, outcome: AgentTurnOutcome) => void,
   onWorkspaceChange: () => void,
@@ -463,10 +469,6 @@ export function useAgentRuntime(
   const [runtime, setRuntime] = useState<AgentRuntimeState>(initialRuntime);
   const [account, setAccount] = useState<AgentAccountSummary | null>(null);
   const [accountUsage, setAccountUsage] = useState<AgentAccountUsage | null>(null);
-  const [rateLimits, setRateLimits] = useState<AgentRateLimits | null>(() => {
-    try { return JSON.parse(window.localStorage.getItem(RATE_LIMIT_SNAPSHOT_KEY) ?? "null"); }
-    catch { return null; }
-  });
   const [models, setModels] = useState<AgentModelSummary[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogEntry[]>([]);
   const [threadUsage, setThreadUsage] = useState<Record<string, ThreadTokenUsage>>({});
@@ -474,11 +476,17 @@ export function useAgentRuntime(
   const [compactingTaskId, setCompactingTaskId] = useState<string | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [listenersReady, setListenersReady] = useState(!isTauriHost());
+  const [runProjection, setRunProjection] = useState<RunProjection>(emptyRunProjection);
   const { usage, recordUsage } = useCodexUsage();
   const activeTaskIdRef = useRef(activeTaskId);
+  const activeTimelineReadyRef = useRef(activeTaskTimelineComplete);
+  const questionRequestRef = useRef<AgentQuestionRequest | null>(null);
+  const runProjectionRef = useRef<RunProjection>(emptyRunProjection());
+  const activeEnvironmentIdRef = useRef<string | null>(null);
+  const activeGenerationRef = useRef<number | null>(null);
+  const finishedRunIds = useRef(new Set<string>());
+  const replayedPendingInputs = useRef(new Set<string>());
   const sessionIds = useRef(new Map<string, string>());
-  const sessionModels = useRef(new Map<string, string | null>());
-  const sessionRequestedModels = useRef(new Map<string, string | null>());
   const syncedGoals = useRef(new Map<string, string>());
   const threadTasks = useRef(new Map<string, string>());
   const liveAgentEntries = useRef(new Map<string, string>());
@@ -486,11 +494,9 @@ export function useAgentRuntime(
   const reasoningEntries = useRef(new Map<string, string>());
   const reasoningChannels = useRef(new Map<string, "summary" | "content">());
   const autoTitledTasks = useRef(new Set<string>());
-  const workingTaskId = useRef<string | null>(null);
   const activeTurnIds = useRef(new Map<string, string>());
   const activeTurnDiffs = useRef(new Map<string, string>());
   const pendingUserEntries = useRef(new Map<string, string>());
-  const turnCheckpoints = useRef(new Map<string, { token: string; workspacePath: string }>());
   const taskApprovalPolicies = useRef(new Map<string, AgentApprovalPolicy>());
   const autoResolvingRequests = useRef(new Set<string>());
   const reconnectAttempt = useRef(0);
@@ -501,7 +507,6 @@ export function useAgentRuntime(
   const onTimelineChangeRef = useRef(onTimelineChange);
   const onPlanChangeRef = useRef(onPlanChange);
   const onTaskTitleChangeRef = useRef(onTaskTitleChange);
-  const onTaskThreadChangeRef = useRef(onTaskThreadChange);
   const onTaskGoalChangeRef = useRef(onTaskGoalChange);
   const onTaskFinishedRef = useRef(onTaskFinished);
   const onWorkspaceChangeRef = useRef(onWorkspaceChange);
@@ -511,16 +516,16 @@ export function useAgentRuntime(
   }, [onTimelineChange]);
 
   useEffect(() => {
+    questionRequestRef.current = questionRequest;
+  }, [questionRequest]);
+
+  useEffect(() => {
     onPlanChangeRef.current = onPlanChange;
   }, [onPlanChange]);
 
   useEffect(() => {
     onTaskTitleChangeRef.current = onTaskTitleChange;
   }, [onTaskTitleChange]);
-
-  useEffect(() => {
-    onTaskThreadChangeRef.current = onTaskThreadChange;
-  }, [onTaskThreadChange]);
 
   useEffect(() => {
     onTaskGoalChangeRef.current = onTaskGoalChange;
@@ -533,14 +538,6 @@ export function useAgentRuntime(
   useEffect(() => {
     onWorkspaceChangeRef.current = onWorkspaceChange;
   }, [onWorkspaceChange]);
-
-  useEffect(() => () => {
-    const checkpoints = [...turnCheckpoints.current.values()];
-    turnCheckpoints.current.clear();
-    checkpoints.forEach((checkpoint) => {
-      void nativeBridge.discardGitCheckpoint(checkpoint.token).catch(() => undefined);
-    });
-  }, []);
 
   const appendRuntimeLog = useCallback(
     (stream: RuntimeLogEntry["stream"], text: string) => {
@@ -559,8 +556,10 @@ export function useAgentRuntime(
 
   useEffect(() => {
     activeTaskIdRef.current = activeTaskId;
+    activeTimelineReadyRef.current = activeTaskTimelineComplete;
     timelineCache.current.set(activeTaskId, activeTaskTimeline);
     taskApprovalPolicies.current.set(activeTaskId, activeTaskApprovalPolicy);
+    setQuestionRequest((current) => current?.taskId === activeTaskId ? current : null);
     setRuntime((current) => ({
       ...current,
       threadId:
@@ -568,7 +567,12 @@ export function useAgentRuntime(
           ? current.threadId
           : sessionIds.current.get(activeTaskId) ?? null,
     }));
-  }, [activeTaskApprovalPolicy, activeTaskId, activeTaskTimeline]);
+  }, [
+    activeTaskApprovalPolicy,
+    activeTaskId,
+    activeTaskTimeline,
+    activeTaskTimelineComplete,
+  ]);
 
   const updateTimeline = useCallback(
     (taskId: string, update: (current: TimelineEntry[]) => TimelineEntry[]) => {
@@ -621,8 +625,12 @@ export function useAgentRuntime(
         ));
       }
       try {
-        await nativeBridge.replyToAgent(
-          requestId,
+        const pendingInputId = (timelineCache.current.get(taskId) ?? []).find(
+          (entry) => entry.id === entryId || String(entry.requestId) === String(requestId),
+        )?.pendingInputId;
+        if (!pendingInputId) throw new Error("The native approval request is no longer active.");
+        await nativeBridge.resolveXiaoRunInput(
+          pendingInputId,
           approvalResponse(approvalKind, undefined, "decline"),
         );
         if (entryId) {
@@ -652,66 +660,18 @@ export function useAgentRuntime(
   );
 
   const refreshAccountUsage = useCallback(async () => {
-    const [usageResult, limitsResult] = await Promise.allSettled([
-      nativeBridge.readAgentUsage(),
-      nativeBridge.agentRequest<Record<string, unknown>>("account/rateLimits/read", null),
-    ]);
-    setAccountUsage(usageResult.status === "fulfilled" ? usageResult.value : null);
-    if (limitsResult.status !== "fulfilled") {
-      return;
+    try {
+      setAccountUsage(await nativeBridge.readAgentUsage(workspacePath, activeTaskIdRef.current));
+    } catch {
+      setAccountUsage(null);
     }
-    const snapshot = limitsResult.value.rateLimits;
-    if (!snapshot || typeof snapshot !== "object") {
-      return;
-    }
-    const value = snapshot as Record<string, unknown>;
-    const readWindow = (raw: unknown): AgentRateLimits["primary"] => {
-      if (!raw || typeof raw !== "object") return null;
-      const window = raw as Record<string, unknown>;
-      if (typeof window.usedPercent !== "number") return null;
-      return {
-        usedPercent: window.usedPercent,
-        windowDurationMins:
-          typeof window.windowDurationMins === "number" ? window.windowDurationMins : null,
-        resetsAt: typeof window.resetsAt === "number" ? window.resetsAt : null,
-      };
-    };
-    const credits = value.credits;
-    const balance = credits && typeof credits === "object"
-      ? (credits as Record<string, unknown>).balance
-      : null;
-    const parsedBalance = typeof balance === "string" ? Number(balance) : null;
-    const nextLimits: AgentRateLimits = {
-      primary: readWindow(value.primary),
-      secondary: readWindow(value.secondary),
-      creditsRemaining: parsedBalance != null && Number.isFinite(parsedBalance) ? parsedBalance : null,
-      updatedAt: Date.now(),
-    };
-    setRateLimits(nextLimits);
-    try { window.localStorage.setItem(RATE_LIMIT_SNAPSHOT_KEY, JSON.stringify(nextLimits)); }
-    catch { /* Live state remains available. */ }
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriHost() || (runtime.phase !== "ready" && runtime.phase !== "working")) return;
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refreshAccountUsage();
-    };
-    const timer = window.setInterval(refreshWhenVisible, 30_000);
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [refreshAccountUsage, runtime.phase]);
+  }, [workspacePath]);
 
   const refreshRuntimeIdentity = useCallback(async () => {
     try {
       const [nextAccount, nextModels] = await Promise.all([
-        nativeBridge.readAgentAccount(),
-        nativeBridge.listAgentModels(),
+        nativeBridge.readAgentAccount(workspacePath, activeTaskIdRef.current),
+        nativeBridge.listAgentModels(workspacePath, activeTaskIdRef.current),
       ]);
       setAccount(nextAccount);
       setModels(nextModels);
@@ -729,7 +689,7 @@ export function useAgentRuntime(
         error: reason instanceof Error ? reason.message : String(reason),
       }));
     }
-  }, [refreshAccountUsage]);
+  }, [refreshAccountUsage, workspacePath]);
 
   const resolveTaskId = useCallback((message: AgentMessage) => {
     const threadId = readMessageThreadId(message);
@@ -737,95 +697,20 @@ export function useAgentRuntime(
       const taskId = threadTasks.current.get(threadId);
       if (taskId) return taskId;
     }
-    return workingTaskId.current ?? activeTaskIdRef.current;
+    return activeTaskIdRef.current;
   }, []);
 
-  const sendTurn = useCallback(async (
-    threadId: string,
-    prompt: string,
-    attachments: AgentAttachment[],
-    taskId: string,
-    reasoningEffort: string | null,
-    mode: AgentMode,
-    model: string | null,
-    approvalPolicy: AgentApprovalPolicy,
-    sandboxMode: AgentSandboxMode,
-    turnWorkspacePath: string,
-  ) => {
-    taskApprovalPolicies.current.set(taskId, approvalPolicy);
-    const params: Record<string, unknown> = {
-      threadId,
-      input: userInput(prompt, attachments),
-      effort: reasoningEffort,
-      approvalPolicy,
-      sandboxPolicy: sandboxPolicyForTurn(sandboxMode, turnWorkspacePath),
-    };
-    if (mode !== "plan") {
-      params.additionalContext = {
-        "xiao.plan-progress": {
-          kind: "application",
-          value: PLAN_PROGRESS_INSTRUCTIONS,
-        },
-      };
-    }
-    if (mode === "plan" && model) {
-      params.collaborationMode = {
-        mode: "plan",
-        settings: {
-          model,
-          reasoning_effort: reasoningEffort,
-          developer_instructions: null,
-        },
-      };
-    }
-    const staleCheckpoint = turnCheckpoints.current.get(taskId);
-    if (staleCheckpoint) {
-      turnCheckpoints.current.delete(taskId);
-      void nativeBridge.discardGitCheckpoint(staleCheckpoint.token).catch(() => undefined);
-    }
-    try {
-      const checkpoint = await nativeBridge.createGitCheckpoint(turnWorkspacePath);
-      turnCheckpoints.current.set(taskId, { token: checkpoint, workspacePath: turnWorkspacePath });
-    } catch (reason) {
-      appendRuntimeLog(
-        "stderr",
-        `Undo checkpoint unavailable: ${reason instanceof Error ? reason.message : String(reason)}`,
-      );
-    }
-    workingTaskId.current = taskId;
-    setRuntime((current) => ({
-      ...current,
-      phase: "working",
-      taskId,
-      threadId: activeTaskIdRef.current === taskId ? threadId : current.threadId,
-      turnStartedAt: current.turnStartedAt ?? Date.now(),
-      error: null,
-    }));
-    let response: TurnStartResponse;
-    try {
-      response = await nativeBridge.agentRequest<TurnStartResponse>("turn/start", params);
-    } catch (reason) {
-      const checkpoint = turnCheckpoints.current.get(taskId);
-      turnCheckpoints.current.delete(taskId);
-      if (checkpoint) void nativeBridge.discardGitCheckpoint(checkpoint.token).catch(() => undefined);
-      throw reason;
-    }
-    const turnId = response.turn?.id;
-    if (turnId) {
-      activeTurnIds.current.set(taskId, turnId);
-      const pendingEntryId = pendingUserEntries.current.get(taskId);
-      if (pendingEntryId) {
-        updateTimeline(taskId, (current) => current.map((entry) =>
-          entry.id === pendingEntryId ? { ...entry, turnId } : entry,
-        ));
-      }
-      setRuntime((current) => ({ ...current, turnId }));
-    }
-    return turnId ?? null;
-  }, [appendRuntimeLog, updateTimeline]);
-
   const handleMessage = useCallback(
-    async (message: AgentMessage) => {
+    async (
+      message: AgentMessage,
+      route?: {
+        taskId: string;
+        runId: string;
+        pendingInput: PendingInputSnapshot | null;
+        turnDiff?: string | null;
+        replayed?: boolean;
+      },
+    ) => {
       setRuntime((current) => ({ ...current, eventsSeen: current.eventsSeen + 1 }));
 
       const outputDelta =
@@ -837,11 +722,6 @@ export function useAgentRuntime(
       else if (message.method) appendRuntimeLog("event", message.method);
       else if (message.id != null) {
         appendRuntimeLog(message.error ? "stderr" : "event", `response ${String(message.id)}`);
-      }
-
-      if (message.method === "account/rateLimits/updated") {
-        void refreshAccountUsage();
-        return;
       }
 
       if (message.method === "serverRequest/resolved") {
@@ -866,29 +746,46 @@ export function useAgentRuntime(
             turnStartedAt: null,
             error,
           }));
-          void nativeBridge.stopAgent().catch(() => {
+          void nativeBridge.stopAgent(workspacePath, activeTaskIdRef.current).catch(() => {
             runtimeStopError.current = null;
           });
           return;
         }
         if (message.result) {
           reconnectAttempt.current = 0;
-          setRuntime((current) => ({
-            ...current,
-            phase: "ready",
-            taskId: null,
-            turnStartedAt: null,
-            error: null,
-          }));
+          const activeRun = activeRunForTask(
+            runProjectionRef.current,
+            activeTaskIdRef.current,
+          );
+          setRuntime((current) => activeRun
+            ? {
+                ...current,
+                phase: "working",
+                taskId: activeRun.taskId,
+                threadId: activeRun.threadId,
+                turnId: activeRun.turnId,
+                turnStartedAt: activeRun.startedAt,
+                error: null,
+              }
+            : {
+                ...current,
+                phase: "ready",
+                taskId: null,
+                turnStartedAt: null,
+                error: null,
+              });
           void refreshRuntimeIdentity();
           return;
         }
       }
 
-      const taskId = resolveTaskId(message);
+      const taskId = route?.taskId ?? resolveTaskId(message);
 
       if (message.method === "item/tool/requestUserInput") {
-        const request = readQuestionRequest(message, taskId);
+        const pendingInput = route?.pendingInput;
+        const request = pendingInput
+          ? readQuestionRequest(message, taskId, pendingInput.id, route.runId)
+          : null;
         if (request) {
           setQuestionRequest(request);
         } else {
@@ -907,34 +804,26 @@ export function useAgentRuntime(
         const requestMessage = typeof message.params?.message === "string"
           ? message.params.message
           : "The MCP server requested interactive input that Xiao cannot collect yet.";
-        try {
-          await nativeBridge.replyToAgent(message.id, mcpElicitationDeclineResponse());
-          const entryId = `elicitation-${String(message.id)}`;
-          updateTimeline(taskId, (current) =>
-            current.some((entry) => entry.id === entryId)
-              ? current
-              : [
-                  ...current,
-                  {
-                    id: entryId,
-                    kind: "approval",
-                    title: "MCP input request declined",
-                    createdAt: Date.now(),
-                    body: [
-                      requestMessage,
-                      "Interactive MCP elicitation is not available in Xiao yet, so this request was declined instead of leaving the turn blocked.",
-                    ].join("\n\n"),
-                    meta: serverName,
-                    status: "error",
-                  },
-                ],
-          );
-        } catch (reason) {
-          setRuntime((current) => ({
-            ...current,
-            error: reason instanceof Error ? reason.message : String(reason),
-          }));
-        }
+        const entryId = `elicitation-${route?.pendingInput?.id ?? String(message.id)}`;
+        updateTimeline(taskId, (current) =>
+          current.some((entry) => entry.id === entryId)
+            ? current
+            : [
+                ...current,
+                {
+                  id: entryId,
+                  kind: "approval",
+                  title: "MCP input request declined",
+                  createdAt: Date.now(),
+                  body: [
+                    requestMessage,
+                    "Interactive MCP elicitation is not available in Xiao yet, so the native run service declined this request.",
+                  ].join("\n\n"),
+                  meta: serverName,
+                  status: "error",
+                },
+              ],
+        );
         return;
       }
 
@@ -947,20 +836,24 @@ export function useAgentRuntime(
         const threadId = readMessageThreadId(message);
         if (turnId) {
           activeTurnIds.current.set(taskId, turnId);
-          const pendingEntryId = pendingUserEntries.current.get(taskId);
+          const pendingEntryId = route
+            ? runProjectionRef.current.runsById[route.runId]?.idempotencyKey
+            : pendingUserEntries.current.get(taskId);
           if (pendingEntryId) {
             updateTimeline(taskId, (current) => current.map((entry) =>
               entry.id === pendingEntryId ? { ...entry, turnId } : entry,
             ));
           }
         }
-        setRuntime((current) => ({
-          ...current,
-          phase: "working",
-          taskId,
-          threadId: threadId ?? current.threadId,
-          turnId,
-        }));
+        if (!route || taskId === activeTaskIdRef.current) {
+          setRuntime((current) => ({
+            ...current,
+            phase: "working",
+            taskId,
+            threadId: threadId ?? current.threadId,
+            turnId,
+          }));
+        }
       }
 
       if (
@@ -1181,7 +1074,13 @@ export function useAgentRuntime(
         if (item.type === "commandExecution" || item.type === "collabAgentToolCall") {
           settleThinking(taskId);
           const entry = timelineEntryFromItem(item);
-          if (entry) updateTimeline(taskId, (current) => [...current, entry]);
+          if (entry) {
+            updateTimeline(taskId, (current) =>
+              current.some((currentEntry) => currentEntry.id === entry.id)
+                ? current
+                : [...current, entry],
+            );
+          }
         }
       }
 
@@ -1220,15 +1119,26 @@ export function useAgentRuntime(
           activeThinkingEntries.current.delete(taskId);
         }
         if (item.type === "fileChange") onWorkspaceChangeRef.current();
-        updateTimeline(taskId, (current) =>
-          current.some((currentEntry) => currentEntry.id === completedEntry.id)
-            ? current.map((currentEntry) =>
-                currentEntry.id === completedEntry.id
-                  ? { ...completedEntry, body: completedEntry.body ?? currentEntry.body }
-                  : currentEntry,
-              )
-            : [...current, completedEntry],
-        );
+        updateTimeline(taskId, (current) => {
+          const timeline = item.type === "contextCompaction"
+            ? invalidateUndoHistory(current)
+            : current;
+          return timeline.some((currentEntry) => currentEntry.id === completedEntry.id)
+            ? timeline.map((currentEntry) => {
+                if (currentEntry.id !== completedEntry.id) return currentEntry;
+                const streamedBody = currentEntry.body;
+                const completedBody = completedEntry.body;
+                const preserveStreamedBody =
+                  (item.type === "agentMessage" || item.type === "reasoning") &&
+                  streamedBody != null &&
+                  (completedBody == null || streamedBody.length > completedBody.length);
+                return {
+                  ...completedEntry,
+                  body: preserveStreamedBody ? streamedBody : completedBody ?? streamedBody,
+                };
+              })
+            : [...timeline, completedEntry];
+        });
       }
 
       if (
@@ -1244,7 +1154,7 @@ export function useAgentRuntime(
           ? permissionGrantFromRequest(message.params?.permissions)
           : undefined;
         const approvalEntry: TimelineEntry = {
-          id: `approval-${String(message.id)}`,
+          id: `approval-${route?.pendingInput?.id ?? String(message.id)}`,
           kind: "approval",
           title: permissionApproval
             ? "Additional permissions requested"
@@ -1263,6 +1173,8 @@ export function useAgentRuntime(
               ? message.params.command
               : undefined,
           requestId: message.id,
+          pendingInputId: route?.pendingInput?.id,
+          runId: route?.runId,
           approvalKind,
           approvalPermissions: requestedPermissions,
           turnId: typeof message.params?.turnId === "string" ? message.params.turnId : undefined,
@@ -1270,16 +1182,16 @@ export function useAgentRuntime(
           status: "warning",
         };
         if (taskApprovalPolicies.current.get(taskId) === "never") {
-          void declineWithoutPrompt(taskId, message.id, approvalKind).then((declined) => {
-            if (declined) return;
-            updateTimeline(taskId, (current) =>
-              current.some((entry) => entry.id === approvalEntry.id)
-                ? current
-                : [...current, { ...approvalEntry, meta: "Automatic decline failed - decide manually" }],
-            );
-          });
+          updateTimeline(taskId, (current) => [
+            ...current,
+            { ...approvalEntry, status: "error", meta: "Declined by Never ask" },
+          ]);
         } else {
-          updateTimeline(taskId, (current) => [...current, approvalEntry]);
+          updateTimeline(taskId, (current) =>
+            current.some((entry) => entry.id === approvalEntry.id)
+              ? current
+              : [...current, approvalEntry],
+          );
         }
       }
 
@@ -1292,6 +1204,9 @@ export function useAgentRuntime(
         const manualCompaction = compactingTasks.current.delete(taskId);
         if (manualCompaction) {
           setCompactingTaskId((current) => current === taskId ? null : current);
+          if (outcome === "completed") {
+            updateTimeline(taskId, invalidateUndoHistory);
+          }
         } else {
           onPlanChangeRef.current(taskId, null);
         }
@@ -1308,47 +1223,46 @@ export function useAgentRuntime(
         const completedTurnId = typeof turn?.id === "string"
           ? turn.id
           : activeTurnIds.current.get(taskId) ?? null;
-        const protocolTurnDiff = completedTurnId
+        const completedTurnDiff = route?.turnDiff ?? (completedTurnId
           ? activeTurnDiffs.current.get(completedTurnId)
-          : undefined;
-        const checkpoint = turnCheckpoints.current.get(taskId);
-        turnCheckpoints.current.delete(taskId);
-        let checkpointTurnDiff: string | undefined;
-        if (checkpoint) {
-          try {
-            checkpointTurnDiff = await nativeBridge.finishGitCheckpoint(
-              checkpoint.workspacePath,
-              checkpoint.token,
-            );
-          } catch (reason) {
-            appendRuntimeLog(
-              "stderr",
-              `Could not finalize undo checkpoint: ${reason instanceof Error ? reason.message : String(reason)}`,
-            );
-          }
-        }
-        const completedTurnDiff = checkpointTurnDiff ?? protocolTurnDiff;
-        const pendingEntryId = pendingUserEntries.current.get(taskId);
+          : undefined);
+        const pendingEntryId = route
+          ? runProjectionRef.current.runsById[route.runId]?.idempotencyKey
+          : pendingUserEntries.current.get(taskId);
         settleThinking(taskId);
         liveAgentEntries.current.delete(taskId);
-        if (workingTaskId.current === taskId) workingTaskId.current = null;
         setQuestionRequest((current) => current?.taskId === taskId ? null : current);
-        setRuntime((current) => ({
-          ...current,
-          phase: "ready",
-          taskId: null,
-          threadId: sessionIds.current.get(activeTaskIdRef.current) ?? null,
-          turnId: null,
-          turnStartedAt: null,
-          error: errorMessage,
-        }));
-        if (!manualCompaction) onTaskFinishedRef.current(taskId, outcome);
-        void refreshAccountUsage();
+        if (!route) {
+          setRuntime((current) => ({
+            ...current,
+            phase: "ready",
+            taskId: null,
+            threadId: sessionIds.current.get(activeTaskIdRef.current) ?? null,
+            turnId: null,
+            turnStartedAt: null,
+            error: errorMessage,
+          }));
+        } else if (errorMessage && !route?.replayed) {
+          setRuntime((current) => ({ ...current, error: errorMessage }));
+        }
+        if (
+          !manualCompaction &&
+          !route?.replayed &&
+          (!route || !finishedRunIds.current.has(route.runId))
+        ) {
+          if (route) finishedRunIds.current.add(route.runId);
+          onTaskFinishedRef.current(taskId, outcome);
+        }
+        if (!route?.replayed) void refreshAccountUsage();
         updateTimeline(taskId, (current) => {
           const settledStatus: TimelineEntry["status"] =
             outcome === "completed" ? "success" : outcome === "failed" ? "error" : "warning";
           const settled = current.map((entry) => {
-            const settledEntry = entry.status === "active"
+            const belongsToCompletedRun = !route ||
+              entry.runId === route.runId ||
+              (completedTurnId != null && entry.turnId === completedTurnId) ||
+              entry.id === pendingEntryId;
+            const settledEntry = entry.status === "active" && belongsToCompletedRun
               ? { ...entry, status: settledStatus }
               : entry;
             if (
@@ -1378,22 +1292,66 @@ export function useAgentRuntime(
             },
           ];
         });
-        pendingUserEntries.current.delete(taskId);
+        if (pendingUserEntries.current.get(taskId) === pendingEntryId) {
+          pendingUserEntries.current.delete(taskId);
+        }
         activeTurnIds.current.delete(taskId);
         if (completedTurnId) activeTurnDiffs.current.delete(completedTurnId);
       }
     },
     [
       appendRuntimeLog,
-      declineWithoutPrompt,
       recordUsage,
       refreshAccountUsage,
       refreshRuntimeIdentity,
       resolveTaskId,
       settleThinking,
       updateTimeline,
+      workspacePath,
     ],
   );
+
+  const publishRunProjection = useCallback((next: RunProjection) => {
+    runProjectionRef.current = next;
+    setRunProjection(next);
+    const activeRun = activeRunForTask(next, activeTaskIdRef.current);
+    if (activeRun) {
+      activeEnvironmentIdRef.current = activeRun.executionEnvironmentId;
+      activeGenerationRef.current = activeRun.runtimeGeneration;
+      if (activeRun.threadId) {
+        sessionIds.current.set(activeRun.taskId, activeRun.threadId);
+        threadTasks.current.set(activeRun.threadId, activeRun.taskId);
+      }
+      if (activeRun.turnId) activeTurnIds.current.set(activeRun.taskId, activeRun.turnId);
+      setRuntime((current) => ({
+        ...current,
+        phase: "working",
+        taskId: activeRun.taskId,
+        threadId: activeRun.threadId,
+        turnId: activeRun.turnId,
+        turnStartedAt: activeRun.startedAt,
+        error: null,
+      }));
+    } else {
+      activeTurnIds.current.delete(activeTaskIdRef.current);
+      setRuntime((current) =>
+        current.phase === "offline" || current.phase === "starting" || current.phase === "error"
+          ? current
+          : {
+              ...current,
+              phase: "ready",
+              taskId: null,
+              threadId: sessionIds.current.get(activeTaskIdRef.current) ?? null,
+              turnId: null,
+              turnStartedAt: null,
+            },
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    publishRunProjection(runProjectionRef.current);
+  }, [activeTaskId, publishRunProjection]);
 
   useEffect(() => {
     if (!isTauriHost()) return;
@@ -1408,43 +1366,134 @@ export function useAgentRuntime(
     const attachListeners = async () => {
       try {
         addCleanup(
-          await listen<AgentMessage>("agent://message", (event) => {
-            if (!disposed) void handleMessage(event.payload);
-          }),
-        );
-        addCleanup(
-          await listen<string>("agent://stderr", (event) => {
-            if (!disposed && event.payload.trim()) {
-              appendRuntimeLog("stderr", event.payload);
+          await listen<RunUpdateEnvelope>("xiao://run-update", (event) => {
+            if (disposed || event.payload.snapshot.workspacePath !== workspacePath) return;
+            const next = projectRunUpdate(runProjectionRef.current, event.payload);
+            publishRunProjection(next);
+            const pending = event.payload.pendingInput;
+            if (pending?.resolvedAt != null || pending?.invalidatedAt != null) {
+              setQuestionRequest((current) =>
+                current?.pendingInputId === pending.id ? null : current,
+              );
+            }
+            const run = event.payload.snapshot;
+            if (
+              run.status === "completed" ||
+              run.status === "failed" ||
+              run.status === "cancelled" ||
+              run.status === "interrupted"
+            ) {
+              setQuestionRequest((current) => current?.runId === run.id ? null : current);
+              const outcome: AgentTurnOutcome = run.status === "completed"
+                ? "completed"
+                : run.status === "failed"
+                  ? "failed"
+                  : "interrupted";
+              if (
+                run.taskId === activeTaskIdRef.current &&
+                activeTimelineReadyRef.current
+              ) {
+                const status = timelineStatusForRun(run.status);
+                updateTimeline(run.taskId, (current) => {
+                  const settled = current.map((entry) =>
+                    entry.status === "active" &&
+                    (entry.runId === run.id || (run.turnId && entry.turnId === run.turnId))
+                      ? { ...entry, status }
+                      : entry,
+                  );
+                  return reconcilePendingApprovalEntries(settled, null, run.id);
+                });
+              }
+              if (!finishedRunIds.current.has(run.id)) {
+                finishedRunIds.current.add(run.id);
+                onTaskFinishedRef.current(run.taskId, outcome);
+              }
             }
           }),
         );
         addCleanup(
-           await listen("agent://stopped", () => {
-             if (!disposed) {
-               const stopError = runtimeStopError.current;
-               runtimeStopError.current = null;
-               if (!stopError) reconnectAttempt.current += 1;
-                sessionIds.current.clear();
-               sessionModels.current.clear();
-               sessionRequestedModels.current.clear();
-              threadTasks.current.clear();
-              liveAgentEntries.current.clear();
-              activeThinkingEntries.current.clear();
-               reasoningEntries.current.clear();
-               reasoningChannels.current.clear();
-               compactingTasks.current.clear();
-               workingTaskId.current = null;
-               appendRuntimeLog("system", "Agent runtime stopped.");
-              setAccount(null);
-               setAccountUsage(null);
-               setRateLimits(null);
-               setModels([]);
-                setThreadUsage({});
-                setQuestionRequest(null);
-               setCompactingTaskId(null);
-               setRuntime(stopError ? { ...initialRuntime, phase: "error", error: stopError } : initialRuntime);
-             }
+          await listen<RunProtocolEnvelope>("xiao://run-protocol", (event) => {
+            if (
+              disposed ||
+              event.payload.taskId !== activeTaskIdRef.current ||
+              !activeTimelineReadyRef.current
+            ) return;
+            const accepted = acceptRunProtocol(runProjectionRef.current, event.payload);
+            if (!accepted.accepted) return;
+            publishRunProjection(accepted.projection);
+            void handleMessage(event.payload.message, {
+              taskId: event.payload.taskId,
+              runId: event.payload.runId,
+              pendingInput: event.payload.pendingInput,
+              turnDiff: event.payload.turnDiff,
+            });
+          }),
+        );
+        addCleanup(
+          await listen<RuntimeMessageEnvelope>("agent://runtime-message", (event) => {
+            const activeEnvironmentId = activeEnvironmentIdRef.current;
+            const activeGeneration = activeGenerationRef.current;
+            if (
+              !disposed &&
+              (!activeEnvironmentId || event.payload.environmentId === activeEnvironmentId) &&
+              (activeGeneration == null || event.payload.generation === activeGeneration) &&
+              (event.payload.message.id === 0 || compactingTasks.current.size > 0)
+            ) {
+              void handleMessage(event.payload.message);
+            }
+          }),
+        );
+        addCleanup(
+          await listen<RuntimeDiagnosticEnvelope>("agent://runtime-stderr", (event) => {
+            if (
+              !disposed &&
+              event.payload.message.trim() &&
+              (!activeEnvironmentIdRef.current ||
+                event.payload.environmentId === activeEnvironmentIdRef.current)
+            ) {
+              appendRuntimeLog("stderr", event.payload.message);
+            }
+          }),
+        );
+        addCleanup(
+          await listen<RuntimeStoppedEnvelope>("agent://runtime-stopped", (event) => {
+            if (
+              disposed ||
+              (activeEnvironmentIdRef.current &&
+                event.payload.environmentId !== activeEnvironmentIdRef.current)
+            ) return;
+            const stopError = runtimeStopError.current;
+            runtimeStopError.current = null;
+            if (!stopError) reconnectAttempt.current += 1;
+            activeGenerationRef.current = null;
+            sessionIds.current.clear();
+            threadTasks.current.clear();
+            liveAgentEntries.current.clear();
+            activeThinkingEntries.current.clear();
+            reasoningEntries.current.clear();
+            reasoningChannels.current.clear();
+            compactingTasks.current.clear();
+            syncedGoals.current.clear();
+            appendRuntimeLog("system", "Agent runtime stopped.");
+            setAccount(null);
+            setAccountUsage(null);
+            setModels([]);
+            setThreadUsage({});
+            setQuestionRequest(null);
+            setCompactingTaskId(null);
+            setRuntime(
+              stopError
+                ? { ...initialRuntime, phase: "error", error: stopError }
+                : initialRuntime,
+            );
+          }),
+        );
+        addCleanup(
+          await listen<string>("xiao://run-service-error", (event) => {
+            if (!disposed) {
+              appendRuntimeLog("stderr", event.payload);
+              setRuntime((current) => ({ ...current, error: event.payload }));
+            }
           }),
         );
         if (!disposed) setListenersReady(true);
@@ -1467,7 +1516,161 @@ export function useAgentRuntime(
       setListenersReady(false);
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [appendRuntimeLog, handleMessage]);
+  }, [appendRuntimeLog, handleMessage, publishRunProjection, workspacePath]);
+
+  useEffect(() => {
+    if (!isTauriHost() || !listenersReady) return;
+    let cancelled = false;
+    replayedPendingInputs.current.clear();
+    finishedRunIds.current.clear();
+    const empty = emptyRunProjection();
+    publishRunProjection(empty);
+    void nativeBridge.listXiaoRuns(workspacePath, null, 100).then((runs) => {
+      if (cancelled) return;
+      for (const run of runs) {
+        if (run.threadId && runStatusIsActive(run.status)) {
+          sessionIds.current.set(run.taskId, run.threadId);
+          threadTasks.current.set(run.threadId, run.taskId);
+          if (run.turnId) activeTurnIds.current.set(run.taskId, run.turnId);
+        }
+      }
+      publishRunProjection(mergeListedRunSnapshots(runProjectionRef.current, runs));
+    }).catch((reason) => {
+      if (!cancelled) {
+        setRuntime((current) => ({
+          ...current,
+          error: reason instanceof Error ? reason.message : String(reason),
+        }));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [listenersReady, publishRunProjection, workspacePath]);
+
+  useEffect(() => {
+    if (!isTauriHost() || !listenersReady || !activeTaskTimelineComplete) return;
+    let cancelled = false;
+    replayedPendingInputs.current.clear();
+    const restore = async () => {
+      const [runs, pendingInputs] = await Promise.all([
+        nativeBridge.listXiaoRuns(workspacePath, activeTaskId, 50),
+        nativeBridge.listXiaoPendingInputs(workspacePath, activeTaskId),
+      ]);
+      if (cancelled) return;
+      publishRunProjection(projectRunSnapshots(runProjectionRef.current, runs));
+      const orderedRuns = [...runs].sort(
+        (left, right) => left.queuedAt - right.queuedAt || left.id.localeCompare(right.id),
+      );
+      const activePendingInputIds = activePendingInputIdsForRestore(
+        runProjectionRef.current,
+        pendingInputs,
+      );
+      updateTimeline(activeTaskId, (current) => {
+        let next = current;
+        for (const run of orderedRuns) {
+          const status = timelineStatusForRun(run.status);
+          const existing = next.find(
+            (entry) => entry.id === run.idempotencyKey || entry.runId === run.id,
+          );
+          if (existing) {
+            next = next.map((entry) =>
+              entry.id === existing.id
+                ? {
+                    ...entry,
+                    runId: run.id,
+                    status,
+                    turnId: run.turnId ?? entry.turnId,
+                    meta: run.status === "queued" ? "Queued" : "You",
+                  }
+                : entry,
+            );
+            continue;
+          }
+          next = [
+            ...next,
+            {
+              id: run.idempotencyKey,
+              runId: run.id,
+              kind: "user",
+              title: run.prompt,
+              createdAt: run.queuedAt,
+              meta: run.status === "queued" ? "Queued" : "You",
+              status,
+              turnId: run.turnId ?? undefined,
+            },
+          ];
+        }
+        return reconcilePendingApprovalEntries(next, activePendingInputIds);
+      });
+
+      for (const run of orderedRuns) {
+        if (cancelled) return;
+        if (run.runtimeGeneration == null || !run.threadId) continue;
+        if (run.turnId) activeTurnIds.current.set(run.taskId, run.turnId);
+        const page = await nativeBridge.loadXiaoRunEvents(run.id, null, 200);
+        for (const event of page.events) {
+          if (cancelled) return;
+          const message = messageFromRunEvent(event);
+          if (!message) continue;
+          const envelope: RunProtocolEnvelope = {
+            runId: run.id,
+            taskId: run.taskId,
+            executionEnvironmentId: run.executionEnvironmentId,
+            runtimeGeneration: run.runtimeGeneration,
+            threadId: run.threadId,
+            turnId: run.turnId,
+            itemId: null,
+            sequence: event.sequence,
+            message,
+            turnDiff: null,
+            pendingInput: null,
+          };
+          const accepted = acceptRunProtocol(runProjectionRef.current, envelope);
+          if (!accepted.accepted) continue;
+          publishRunProjection(accepted.projection);
+          if (run.turnId) activeTurnIds.current.set(run.taskId, run.turnId);
+          await handleMessage(message, {
+            taskId: run.taskId,
+            runId: run.id,
+            pendingInput: null,
+            replayed: true,
+          });
+        }
+      }
+
+      for (const pending of pendingInputs) {
+        if (
+          cancelled ||
+          replayedPendingInputs.current.has(pending.id) ||
+          !shouldRestorePendingInput(runProjectionRef.current, pending)
+        ) continue;
+        const run = runs.find((item) => item.id === pending.runId);
+        if (!run) continue;
+        replayedPendingInputs.current.add(pending.id);
+        await handleMessage(messageFromPendingInput(pending), {
+          taskId: run.taskId,
+          runId: run.id,
+          pendingInput: pending,
+        });
+      }
+    };
+    void restore().catch((reason) => {
+      if (!cancelled) {
+        setRuntime((current) => ({
+          ...current,
+          error: reason instanceof Error ? reason.message : String(reason),
+        }));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [
+    activeTaskId,
+    activeTaskTimelineComplete,
+    handleMessage,
+    listenersReady,
+    publishRunProjection,
+    updateTimeline,
+    workspacePath,
+  ]);
 
   const connect = useCallback(async () => {
     if (!isTauriHost()) {
@@ -1479,10 +1682,14 @@ export function useAgentRuntime(
       return;
     }
 
+    activeEnvironmentIdRef.current = null;
+    activeGenerationRef.current = null;
     setRuntime((current) => ({ ...current, phase: "starting", error: null }));
     appendRuntimeLog("system", "Starting Codex app-server.");
     try {
-      const result = await nativeBridge.startAgent();
+      const result = await nativeBridge.startAgent(workspacePath, activeTaskIdRef.current);
+      activeEnvironmentIdRef.current = result.environmentId;
+      activeGenerationRef.current = result.generation;
       appendRuntimeLog("system", `Codex ${result.version} connected.`);
       if (result.alreadyRunning) {
         reconnectAttempt.current = 0;
@@ -1497,7 +1704,7 @@ export function useAgentRuntime(
         error: reason instanceof Error ? reason.message : String(reason),
       }));
     }
-  }, [appendRuntimeLog, refreshRuntimeIdentity]);
+  }, [appendRuntimeLog, refreshRuntimeIdentity, workspacePath]);
 
   useEffect(() => {
     if (
@@ -1517,135 +1724,46 @@ export function useAgentRuntime(
   }, [autoConnect, connect, listenersReady, runtime.phase]);
 
   const submit = useCallback(
-    async (prompt: string, attachments: AgentAttachment[]) => {
+    async (
+      prompt: string,
+      attachments: AgentAttachment[],
+      idempotencyKey: string = crypto.randomUUID(),
+    ) => {
       const cleanPrompt = prompt.trim();
-      if (!cleanPrompt) return false;
-      if (
-        runtime.phase === "working" &&
-        workingTaskId.current === activeTaskId &&
-        runtime.threadId &&
-        runtime.turnId
-      ) {
-        const userEntryId = crypto.randomUUID();
-        updateTimeline(activeTaskId, (current) => [
-          ...current,
-          {
-            id: userEntryId,
-            kind: "user",
-            title: cleanPrompt,
-            createdAt: Date.now(),
-            attachments: attachments.length ? attachments : undefined,
-            meta: "Steered",
-            status: "active",
-            turnId: runtime.turnId ?? undefined,
-          },
-        ]);
-        try {
-          await nativeBridge.agentRequest("turn/steer", {
-            threadId: runtime.threadId,
-            expectedTurnId: runtime.turnId,
-            input: userInput(cleanPrompt, attachments),
-          });
-          updateTimeline(activeTaskId, (current) =>
-            current.map((entry) =>
-              entry.id === userEntryId ? { ...entry, status: "success" } : entry,
-            ),
-          );
-          return true;
-        } catch (reason) {
-          updateTimeline(activeTaskId, (current) =>
-            current.filter((entry) => entry.id !== userEntryId),
-          );
-          setRuntime((current) => ({
-            ...current,
-            error: reason instanceof Error ? reason.message : String(reason),
-          }));
-          return false;
-        }
-      }
-      if (runtime.phase !== "ready") {
-        setRuntime((current) => ({
-          ...current,
-          error: "Connect Xiao before starting a task.",
-        }));
-        return false;
-      }
-
+      if (!cleanPrompt || !isTauriHost()) return false;
       const currentTimeline = timelineCache.current.get(activeTaskId) ?? activeTaskTimeline;
-      const userEntryId = crypto.randomUUID();
-      updateTimeline(activeTaskId, (current) => [
-        ...current,
-        {
-          id: userEntryId,
-          kind: "user",
-          title: cleanPrompt,
-          createdAt: Date.now(),
-          attachments: attachments.length ? attachments : undefined,
-          meta: "You",
-          status: "active",
-        },
-      ]);
+      const userEntryId = idempotencyKey;
+      const existingUserEntry = currentTimeline.some((entry) => entry.id === userEntryId);
+      updateTimeline(activeTaskId, (current) =>
+        current.some((entry) => entry.id === userEntryId)
+          ? current
+          : [
+              ...current,
+              {
+                id: userEntryId,
+                kind: "user",
+                title: cleanPrompt,
+                createdAt: Date.now(),
+                attachments: attachments.length ? attachments : undefined,
+                meta: "Queued",
+                status: "active",
+              },
+            ],
+      );
       pendingUserEntries.current.set(activeTaskId, userEntryId);
-      workingTaskId.current = activeTaskId;
-      setRuntime((current) => ({
-        ...current,
-        phase: "working",
-        taskId: activeTaskId,
-        turnStartedAt: Date.now(),
-        error: null,
-      }));
-      let threadId = sessionIds.current.get(activeTaskId) ?? activeTaskThreadId ?? undefined;
-
+      const requestedModel = activeTaskModel
+        ? models.find((model) => model.model === activeTaskModel)
+        : models.find((model) => model.isDefault);
       try {
-        const needsSession = needsAgentSession(
-          threadId,
-          sessionRequestedModels.current.has(activeTaskId),
-          sessionRequestedModels.current.get(activeTaskId),
-          activeTaskModel,
-        );
-        if (needsSession) {
-          const session = await nativeBridge.startXiaoSession(
-            workspacePath,
-            activeTaskModel,
-            historyFromTimeline(currentTimeline),
-            threadId ?? null,
-            activeTaskApprovalPolicy,
-            activeTaskSandboxMode,
-          );
-          threadId = session.threadId;
-          sessionIds.current.set(activeTaskId, threadId);
-          sessionModels.current.set(activeTaskId, session.model);
-          sessionRequestedModels.current.set(activeTaskId, activeTaskModel);
-          threadTasks.current.set(threadId, activeTaskId);
-          onTaskThreadChangeRef.current(activeTaskId, threadId);
-        }
-        if (!threadId) throw new Error("Codex did not return a thread id.");
-        if (
-          activeTaskGoal &&
-          syncedGoals.current.get(activeTaskId) !== `${activeTaskGoal.status}:${activeTaskGoal.objective}`
-        ) {
-          await nativeBridge.agentRequest("thread/goal/set", {
-            threadId,
-            objective: activeTaskGoal.objective,
-            status: activeTaskGoal.status,
-          });
-          syncedGoals.current.set(
-            activeTaskId,
-            `${activeTaskGoal.status}:${activeTaskGoal.objective}`,
-          );
-        }
-        const turnId = await sendTurn(
-          threadId,
-          cleanPrompt,
-          attachments,
-          activeTaskId,
-          activeTaskReasoningEffort,
-          activeTaskMode,
-          sessionModels.current.get(activeTaskId) ?? activeTaskModel,
-          activeTaskApprovalPolicy,
-          activeTaskSandboxMode,
-          workspacePath,
-        );
+        const run = await nativeBridge.enqueueXiaoRun({
+          projectPath: workspacePath,
+          taskId: activeTaskId,
+          idempotencyKey: userEntryId,
+          prompt: cleanPrompt,
+          input: userInput(cleanPrompt, attachments),
+          history: historyFromTimeline(currentTimeline),
+          serviceTier: serviceTierForFastMode(requestedModel, fastMode),
+        });
         if (activeTaskTitle === "New task") {
           autoTitledTasks.current.add(activeTaskId);
           onTaskTitleChangeRef.current(activeTaskId, titleFromPrompt(cleanPrompt));
@@ -1653,26 +1771,20 @@ export function useAgentRuntime(
         updateTimeline(activeTaskId, (current) =>
           current.map((entry) =>
             entry.id === userEntryId
-              ? { ...entry, status: "success", turnId: turnId ?? entry.turnId }
+              ? { ...entry, runId: run.id, meta: "Queued", status: "active" }
               : entry,
           ),
         );
         return true;
       } catch (reason) {
         pendingUserEntries.current.delete(activeTaskId);
-        const failedTurnId = activeTurnIds.current.get(activeTaskId);
-        activeTurnIds.current.delete(activeTaskId);
-        if (failedTurnId) activeTurnDiffs.current.delete(failedTurnId);
-        updateTimeline(activeTaskId, (current) =>
-          current.filter((entry) => entry.id !== userEntryId),
-        );
-        workingTaskId.current = null;
+        if (!existingUserEntry) {
+          updateTimeline(activeTaskId, (current) =>
+            current.filter((entry) => entry.id !== userEntryId),
+          );
+        }
         setRuntime((current) => ({
           ...current,
-          phase: "ready",
-          taskId: null,
-          turnId: null,
-          turnStartedAt: null,
           error: reason instanceof Error ? reason.message : String(reason),
         }));
         return false;
@@ -1680,17 +1792,11 @@ export function useAgentRuntime(
     },
     [
       activeTaskId,
-      activeTaskApprovalPolicy,
-      activeTaskGoal,
-      activeTaskMode,
       activeTaskModel,
-      activeTaskReasoningEffort,
-      activeTaskSandboxMode,
-      activeTaskTitle,
-      activeTaskThreadId,
       activeTaskTimeline,
-      runtime.phase,
-      sendTurn,
+      activeTaskTitle,
+      fastMode,
+      models,
       updateTimeline,
       workspacePath,
     ],
@@ -1704,7 +1810,6 @@ export function useAgentRuntime(
 
     compactingTasks.current.add(activeTaskId);
     setCompactingTaskId(activeTaskId);
-    workingTaskId.current = activeTaskId;
     setRuntime((current) => ({
       ...current,
       phase: "working",
@@ -1717,12 +1822,15 @@ export function useAgentRuntime(
 
     const request = threadCompactRequest(threadId);
     try {
-      await nativeBridge.agentRequest(request.method, request.params);
+      await nativeBridge.agentRequest(
+        request.method,
+        request.params,
+        { projectPath: workspacePath, taskId: activeTaskId },
+      );
       return true;
     } catch (reason) {
       compactingTasks.current.delete(activeTaskId);
       setCompactingTaskId((current) => current === activeTaskId ? null : current);
-      if (workingTaskId.current === activeTaskId) workingTaskId.current = null;
       const failure = reason instanceof Error ? reason.message : String(reason);
       setRuntime((current) => ({
         ...current,
@@ -1734,22 +1842,43 @@ export function useAgentRuntime(
       }));
       return false;
     }
-  }, [activeTaskId, runtime.phase]);
+  }, [activeTaskId, runtime.phase, workspacePath]);
 
   const interrupt = useCallback(async () => {
-    if (runtime.taskId !== activeTaskId || !runtime.threadId || !runtime.turnId) return;
+    const activeRun = activeRunForTask(runProjectionRef.current, activeTaskId);
+    if (!activeRun) return;
     try {
-      await nativeBridge.agentRequest("turn/interrupt", {
-        threadId: runtime.threadId,
-        turnId: runtime.turnId,
-      });
+      const snapshot = await nativeBridge.cancelXiaoRun(activeRun.id);
+      publishRunProjection(projectRunUpdate(runProjectionRef.current, {
+        snapshot,
+        event: null,
+        pendingInput: null,
+      }));
     } catch (reason) {
       setRuntime((current) => ({
         ...current,
         error: reason instanceof Error ? reason.message : String(reason),
       }));
     }
-  }, [activeTaskId, runtime.taskId, runtime.threadId, runtime.turnId]);
+  }, [activeTaskId, publishRunProjection]);
+
+  const retryRun = useCallback(async (runId: string) => {
+    try {
+      const snapshot = await nativeBridge.retryXiaoRun(runId, `retry:${runId}`);
+      publishRunProjection(projectRunUpdate(runProjectionRef.current, {
+        snapshot,
+        event: null,
+        pendingInput: null,
+      }));
+      return true;
+    } catch (reason) {
+      setRuntime((current) => ({
+        ...current,
+        error: reason instanceof Error ? reason.message : String(reason),
+      }));
+      return false;
+    }
+  }, [publishRunProjection]);
 
   const setApprovalPolicy = useCallback(
     async (approvalPolicy: AgentApprovalPolicy) => {
@@ -1772,10 +1901,11 @@ export function useAgentRuntime(
       const threadId = sessionIds.current.get(activeTaskId);
       if (!threadId) return true;
       try {
-        await nativeBridge.agentRequest("thread/settings/update", {
-          threadId,
-          approvalPolicy,
-        });
+        await nativeBridge.agentRequest(
+          "thread/settings/update",
+          { threadId, approvalPolicy },
+          { projectPath: workspacePath, taskId: activeTaskId },
+        );
         setRuntime((current) => ({ ...current, error: null }));
         return true;
       } catch (reason) {
@@ -1786,14 +1916,12 @@ export function useAgentRuntime(
         return false;
       }
     },
-    [activeTaskId, declineWithoutPrompt],
+    [activeTaskId, declineWithoutPrompt, workspacePath],
   );
 
   const undoLastTurn = useCallback(async (): Promise<AgentUndoResult | null> => {
     const timeline = timelineCache.current.get(activeTaskId) ?? activeTaskTimeline;
-    const target = [...timeline].reverse().find(
-      (entry) => entry.kind === "user" && entry.turnId && entry.turnDiff?.trim(),
-    );
+    const target = latestUndoableTurn(timeline);
     const threadId = sessionIds.current.get(activeTaskId);
     if (undoingRef.current || runtime.phase !== "ready" || !target?.turnId || !threadId) {
       return null;
@@ -1819,14 +1947,18 @@ export function useAgentRuntime(
     setRuntime((current) => ({ ...current, error: null }));
     try {
       if (patch.trim()) {
-        await nativeBridge.applyGitPatch(workspacePath, patch, true, true);
+        await nativeBridge.applyGitPatch(workspacePath, activeTaskId, patch, true, true);
         stage = "files";
-        await nativeBridge.applyGitPatch(workspacePath, patch, true, false);
+        await nativeBridge.applyGitPatch(workspacePath, activeTaskId, patch, true, false);
         patchReverted = true;
       }
 
       stage = "history";
-      await nativeBridge.agentRequest("thread/rollback", { threadId, numTurns: 1 });
+      await nativeBridge.agentRequest(
+        "thread/rollback",
+        { threadId, numTurns: 1 },
+        { projectPath: workspacePath, taskId: activeTaskId },
+      );
 
       const firstTurnIndex = timeline.findIndex((entry) => entry.turnId === target.turnId);
       const remaining = firstTurnIndex < 0
@@ -1851,8 +1983,8 @@ export function useAgentRuntime(
 
       if (patchReverted) {
         try {
-          await nativeBridge.applyGitPatch(workspacePath, patch, false, true);
-          await nativeBridge.applyGitPatch(workspacePath, patch, false, false);
+          await nativeBridge.applyGitPatch(workspacePath, activeTaskId, patch, false, true);
+          await nativeBridge.applyGitPatch(workspacePath, activeTaskId, patch, false, false);
           message += " Xiao restored the workspace changes.";
         } catch (restoreReason) {
           const restoreFailure = restoreReason instanceof Error
@@ -1887,11 +2019,11 @@ export function useAgentRuntime(
         return true;
       }
       try {
-        await nativeBridge.agentRequest("thread/goal/set", {
-          threadId,
-          objective: cleanObjective,
-          status,
-        });
+        await nativeBridge.agentRequest(
+          "thread/goal/set",
+          { threadId, objective: cleanObjective, status },
+          { projectPath: workspacePath, taskId: activeTaskId },
+        );
         syncedGoals.current.set(activeTaskId, `${status}:${cleanObjective}`);
         onTaskGoalChangeRef.current(activeTaskId, goal);
         return true;
@@ -1903,7 +2035,7 @@ export function useAgentRuntime(
         return false;
       }
     },
-    [activeTaskId],
+    [activeTaskId, workspacePath],
   );
 
   const clearGoal = useCallback(async () => {
@@ -1914,7 +2046,11 @@ export function useAgentRuntime(
       return true;
     }
     try {
-      await nativeBridge.agentRequest("thread/goal/clear", { threadId });
+      await nativeBridge.agentRequest(
+        "thread/goal/clear",
+        { threadId },
+        { projectPath: workspacePath, taskId: activeTaskId },
+      );
       onTaskGoalChangeRef.current(activeTaskId, null);
       syncedGoals.current.delete(activeTaskId);
       return true;
@@ -1925,7 +2061,7 @@ export function useAgentRuntime(
       }));
       return false;
     }
-  }, [activeTaskId]);
+  }, [activeTaskId, workspacePath]);
 
   const resolveApproval = useCallback(
     async (
@@ -1949,9 +2085,12 @@ export function useAgentRuntime(
         const approval = (timelineCache.current.get(taskId) ?? []).find(
           (entry) => entry.id === entryId,
         );
-        await nativeBridge.replyToAgent(
-          requestId,
-          approvalResponse(approval?.approvalKind, approval?.approvalPermissions, decision),
+        if (!approval?.pendingInputId) {
+          throw new Error(`Approval ${String(requestId)} is no longer active.`);
+        }
+        await nativeBridge.resolveXiaoRunInput(
+          approval.pendingInputId,
+          approvalResponse(approval.approvalKind, approval.approvalPermissions, decision),
         );
         updateTimeline(taskId, (current) =>
           current.map((entry) =>
@@ -1982,7 +2121,11 @@ export function useAgentRuntime(
   const resolveQuestion = useCallback(
     async (requestId: number | string, answers: Record<string, string[]>) => {
       try {
-        await nativeBridge.replyToAgent(requestId, {
+        const request = questionRequestRef.current;
+        if (!request || String(request.requestId) !== String(requestId)) {
+          throw new Error("This question is no longer attached to a live Xiao run.");
+        }
+        await nativeBridge.resolveXiaoRunInput(request.pendingInputId, {
           answers: Object.fromEntries(
             Object.entries(answers).map(([questionId, values]) => [
               questionId,
@@ -2006,21 +2149,19 @@ export function useAgentRuntime(
     [],
   );
 
-  const activeThreadId = sessionIds.current.get(activeTaskId) ?? activeTaskThreadId ?? null;
+  const activeThreadId = sessionIds.current.get(activeTaskId) ?? null;
+  const activeRun = activeRunForTask(runProjection, activeTaskId);
+  const latestRun = latestRunForTask(runProjection, activeTaskId);
   const compacting = compactingTaskId === activeTaskId;
   const canCompact = runtime.phase === "ready" && Boolean(activeThreadId) && compactingTaskId === null;
   const canUndo = runtime.phase === "ready" && Boolean(
-    activeThreadId &&
-    [...activeTaskTimeline].reverse().some(
-      (entry) => entry.kind === "user" && entry.turnId && entry.turnDiff?.trim(),
-    ),
+    activeThreadId && latestUndoableTurn(activeTaskTimeline),
   );
 
   return {
     runtime,
     account,
     accountUsage,
-    rateLimits,
     models,
     timeline: activeTaskTimeline,
     runtimeLogs,
@@ -2032,10 +2173,22 @@ export function useAgentRuntime(
     canUndo,
     undoing,
     usage,
+    activeRun,
+    latestRun,
+    hasActiveRuns: Object.values(runProjection.runsById).some((run) =>
+      runStatusIsActive(run.status)
+    ),
+    workingTaskIds: [...new Set(
+      Object.values(runProjection.runsById)
+        .filter((run) => runStatusIsActive(run.status))
+        .map((run) => run.taskId),
+    )],
+    isTaskWorking: (taskId: string) => Boolean(activeRunForTask(runProjection, taskId)),
     connect,
     submit,
     compact,
     interrupt,
+    retryRun,
     setApprovalPolicy,
     undoLastTurn,
     setGoal,

@@ -17,9 +17,17 @@ import type {
   AgentRuntimeState,
   AgentSandboxMode,
 } from "../../../core/models/agent";
+import type { ManagedWorktreeSummary } from "../../../core/models/workspace";
+import type { XiaoWorkspaceMode } from "../../../core/models/xiao";
 import type { FocusView } from "../../focus-rail/focus-rail.types";
 import { fileMentionAtCursor, removeFileMention, type FileMention } from "./fileMention";
 import { ModelPicker } from "./ModelPicker";
+import {
+  canNavigatePromptHistory,
+  navigatePromptHistory,
+  normalizePromptHistory,
+  prependPromptHistory,
+} from "./promptHistory";
 import { QuestionDock } from "./QuestionDock";
 import {
   filterSlashCommands,
@@ -28,16 +36,26 @@ import {
   type SlashCommand,
 } from "./slashCommands";
 
+const promptHistoryStorageKey = "xiao.prompt-history.v1";
+
 type ComposerProps = {
   taskId: string;
+  executionTaskId: string | null;
   workspacePath: string;
   runtime: AgentRuntimeState;
   models: AgentModelSummary[];
   selectedModel: string | null;
   selectedReasoningEffort: string | null;
+  fastMode: boolean;
   mode: AgentMode;
   approvalPolicy: AgentApprovalPolicy;
   sandboxMode: AgentSandboxMode;
+  workspaceMode: XiaoWorkspaceMode;
+  isolationAvailable: boolean;
+  isolationUnavailableReason: string | null;
+  environmentBusy: boolean;
+  environmentError: string | null;
+  managedWorktree: ManagedWorktreeSummary | null;
   goal: AgentGoal | null;
   plan: AgentPlan | null;
   changeSummary: { files: number; additions: number; deletions: number };
@@ -55,9 +73,11 @@ type ComposerProps = {
   undoing: boolean;
   onModelChange: (model: string | null) => void;
   onReasoningEffortChange: (effort: string | null) => void;
+  onFastModeChange: (fastMode: boolean) => void;
   onModeChange: (mode: AgentMode) => void;
   onApprovalPolicyChange: (policy: AgentApprovalPolicy) => void;
   onSandboxModeChange: (mode: AgentSandboxMode) => void;
+  onWorkspaceModeChange: (mode: XiaoWorkspaceMode) => Promise<void>;
   onGoalSet: (objective: string, status?: AgentGoal["status"]) => Promise<boolean>;
   onGoalClear: () => Promise<boolean>;
   onOpenView: (view: FocusView) => void;
@@ -78,8 +98,15 @@ type ComposerProps = {
     answers: Record<string, string[]>,
   ) => Promise<boolean>;
   disabled?: boolean;
+  disabledPlaceholder?: string;
   storageError?: string | null;
   autoFocus?: boolean;
+};
+
+const compactBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 };
 
 const attachmentFromPath = (path: string, kind?: AgentAttachment["kind"]): AgentAttachment => {
@@ -107,14 +134,22 @@ const dataUrlAttachment = (file: File) =>
 
 export function Composer({
   taskId,
+  executionTaskId,
   workspacePath,
   runtime,
   models,
   selectedModel,
   selectedReasoningEffort,
+  fastMode,
   mode,
   approvalPolicy,
   sandboxMode,
+  workspaceMode,
+  isolationAvailable,
+  isolationUnavailableReason,
+  environmentBusy,
+  environmentError,
+  managedWorktree,
   goal,
   plan,
   changeSummary,
@@ -132,9 +167,11 @@ export function Composer({
   undoing,
   onModelChange,
   onReasoningEffortChange,
+  onFastModeChange,
   onModeChange,
   onApprovalPolicyChange,
   onSandboxModeChange,
+  onWorkspaceModeChange,
   onGoalSet,
   onGoalClear,
   onOpenView,
@@ -152,6 +189,7 @@ export function Composer({
   onDraftChange,
   onResolveQuestion,
   disabled = false,
+  disabledPlaceholder = "Restore this task to continue",
   storageError = null,
   autoFocus = false,
 }: ComposerProps) {
@@ -172,6 +210,9 @@ export function Composer({
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [activeSlashCommand, setActiveSlashCommand] = useState(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const promptHistory = useRef<string[]>([]);
+  const promptHistoryIndex = useRef(-1);
+  const promptHistoryDraft = useRef<string | null>(null);
   const addMenu = useRef<HTMLDivElement>(null);
   const addMenuTrigger = useRef<HTMLButtonElement>(null);
   const fileSearchRequest = useRef(0);
@@ -233,11 +274,15 @@ export function Composer({
       setFileSearchLoading(true);
       setFileSearchError(null);
       void nativeBridge
-        .agentRequest<FuzzyFileResponse>("fuzzyFileSearch", {
-          query: fileMention.query,
-          roots: [workspacePath],
-          cancellationToken: null,
-        })
+        .agentRequest<FuzzyFileResponse>(
+          "fuzzyFileSearch",
+          {
+            query: fileMention.query,
+            roots: [workspacePath],
+            cancellationToken: null,
+          },
+          { projectPath: workspacePath, taskId: executionTaskId },
+        )
         .then((result) => {
           if (requestId !== fileSearchRequest.current) return;
           setFileResults(result.files.slice(0, 9));
@@ -254,7 +299,7 @@ export function Composer({
     }, 100);
 
     return () => window.clearTimeout(timer);
-  }, [fileMention?.query, runtime.phase, workspacePath]);
+  }, [executionTaskId, fileMention?.query, runtime.phase, workspacePath]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -332,6 +377,59 @@ export function Composer({
     setFileMention(null);
     fileSearchRequest.current += 1;
     setActiveSlashCommand(0);
+  };
+
+  const resetPromptHistoryNavigation = () => {
+    promptHistoryIndex.current = -1;
+    promptHistoryDraft.current = null;
+  };
+
+  const readPromptHistory = () => {
+    try {
+      return normalizePromptHistory(
+        JSON.parse(window.localStorage.getItem(promptHistoryStorageKey) ?? "null") as unknown,
+      );
+    } catch {
+      return [];
+    }
+  };
+
+  const savePromptToHistory = (prompt: string) => {
+    if (!prompt.trim()) return;
+    const next = prependPromptHistory(readPromptHistory(), prompt);
+    promptHistory.current = next;
+    try {
+      window.localStorage.setItem(promptHistoryStorageKey, JSON.stringify(next));
+    } catch {
+      // Prompt history is optional when local storage is unavailable.
+    }
+  };
+
+  const moveThroughPromptHistory = (direction: "up" | "down") => {
+    if (promptHistoryIndex.current === -1) promptHistory.current = readPromptHistory();
+    const result = navigatePromptHistory({
+      direction,
+      entries: promptHistory.current,
+      historyIndex: promptHistoryIndex.current,
+      currentDraft: value,
+      savedDraft: promptHistoryDraft.current,
+    });
+    if (!result.handled) return false;
+
+    promptHistoryIndex.current = result.historyIndex;
+    promptHistoryDraft.current = result.savedDraft;
+    setValue(result.value);
+    setFileMention(null);
+    setSlashQuery(null);
+    window.requestAnimationFrame(() => {
+      if (!textarea.current) return;
+      const cursor = result.cursor === "start" ? 0 : result.value.length;
+      textarea.current.focus();
+      textarea.current.setSelectionRange(cursor, cursor);
+      textarea.current.style.height = "auto";
+      textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 150)}px`;
+    });
+    return true;
   };
 
   const chooseFileResult = (result: FuzzyFileResult) => {
@@ -467,11 +565,13 @@ export function Composer({
 
   const submit = async (delivery: "queue" | "send" = currentTaskWorking ? "queue" : "send") => {
     if (!canSubmit) return;
-    const submittedValue = value.trim() || (reviewContext.length
+    const historyValue = value.trim();
+    const submittedValue = historyValue || (reviewContext.length
       ? "Address these review comments."
       : "Review the attached context.");
     const submittedAttachments = [...attachments, ...reviewContext];
 
+    resetPromptHistoryNavigation();
     updateValue("");
     setAttachments([]);
     setSlashQuery(null);
@@ -481,6 +581,7 @@ export function Composer({
       ? await onQueueFollowUp(submittedValue, submittedAttachments)
       : await onSubmit(submittedValue, submittedAttachments);
     if (submitted) {
+      savePromptToHistory(historyValue);
       onReviewContextSent();
       return;
     }
@@ -516,7 +617,7 @@ export function Composer({
   if (storageError) composerPlaceholder = "Task storage is unavailable";
   else if (compacting) composerPlaceholder = "Compacting session context…";
   else if (undoing) composerPlaceholder = "Undoing the last turn…";
-  else if (disabled) composerPlaceholder = "Restore this task to continue";
+  else if (disabled) composerPlaceholder = disabledPlaceholder;
   else if (runtime.phase === "starting") composerPlaceholder = "Connecting to Codex…";
   else if (runtime.phase === "offline") {
     composerPlaceholder = isTauriHost()
@@ -876,7 +977,7 @@ export function Composer({
             autoFocus={autoFocus}
             value={value}
             disabled={disabled || compacting || undoing}
-            aria-keyshortcuts="Control+Enter Meta+Enter"
+            aria-keyshortcuts="ArrowUp ArrowDown Control+Enter Meta+Enter"
             aria-autocomplete={slashQuery !== null || fileMention ? "list" : undefined}
             aria-controls={slashQuery !== null ? "composer-slash-commands" : undefined}
             aria-expanded={slashQuery !== null ? true : undefined}
@@ -896,6 +997,7 @@ export function Composer({
             placeholder={composerPlaceholder}
             onPaste={onPaste}
             onChange={(event) => {
+              resetPromptHistoryNavigation();
               updateValue(event.target.value);
               syncFileMention(event.target.value, event.target.selectionStart);
               syncSlashCommand(event.target.value, event.target.selectionStart);
@@ -945,6 +1047,22 @@ export function Composer({
                 if (event.key === "Escape") {
                   event.preventDefault();
                   setFileMention(null);
+                  return;
+                }
+              }
+              if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                const direction = event.key === "ArrowUp" ? "up" : "down";
+                if (
+                  canNavigatePromptHistory(
+                    direction,
+                    event.currentTarget.value,
+                    event.currentTarget.selectionStart,
+                    event.currentTarget.selectionEnd,
+                    promptHistoryIndex.current >= 0,
+                  ) && moveThroughPromptHistory(direction)
+                ) {
+                  event.preventDefault();
                   return;
                 }
               }
@@ -1008,6 +1126,35 @@ export function Composer({
                     <span><strong>Capabilities</strong><small>Inspect skills, plugins, MCP, and apps</small></span>
                   </button>
                   <div className="composer-add__settings">
+                    <span>Run environment</span>
+                    <label title={isolationUnavailableReason ?? undefined}>
+                      <span>Workspace</span>
+                      <select
+                        aria-label="Workspace mode"
+                        value={workspaceMode}
+                        disabled={disabled || environmentBusy}
+                        onChange={(event) =>
+                          void onWorkspaceModeChange(event.target.value as XiaoWorkspaceMode)
+                        }
+                      >
+                        <option value="local">Local project</option>
+                        <option
+                          value="managed-worktree"
+                          disabled={!isolationAvailable && workspaceMode !== "managed-worktree"}
+                        >
+                          Isolated worktree
+                        </option>
+                      </select>
+                    </label>
+                    {managedWorktree ? (
+                      <small title={managedWorktree.checkoutPath}>
+                        {managedWorktree.branch} · {managedWorktree.sizeComplete ? "" : "≥"}
+                        {compactBytes(managedWorktree.diskBytes)}
+                        {managedWorktree.hasChanges ? " · uncommitted changes" : ""}
+                      </small>
+                    ) : null}
+                    {environmentBusy ? <small>Preparing execution environment…</small> : null}
+                    {environmentError ? <small className="is-error">{environmentError}</small> : null}
                     <span>Run permissions</span>
                     <label>
                       <span>Approval</span>
@@ -1048,9 +1195,11 @@ export function Composer({
               models={models}
               selectedModel={selectedModel}
               selectedReasoningEffort={selectedReasoningEffort}
+              fastMode={fastMode}
               disabled={disabled || undoing || runtime.phase === "starting"}
               onModelChange={onModelChange}
               onReasoningEffortChange={onReasoningEffortChange}
+              onFastModeChange={onFastModeChange}
             />
           </div>
           <div className="composer__actions">

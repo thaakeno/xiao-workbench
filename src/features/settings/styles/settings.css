@@ -516,7 +516,7 @@
   background: var(--surface-deep);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-micro);
   font-weight: 650;
   letter-spacing: -0.08em;
 }
@@ -567,7 +567,7 @@
 .settings-index__group > span {
   padding: 0 9px 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 620;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -589,7 +589,7 @@
 .settings-index__group > button:hover { background: var(--surface-deep); color: var(--text); }
 .settings-index__group > button.is-active { background: var(--surface-strong); color: var(--text); }
 .settings-index__group > button strong { font-size: var(--text-label); font-weight: 560; }
-.settings-index__group > button small { min-width: 18px; padding: 1px 5px; border-radius: 5px; background: var(--surface-deep); color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-align: center; }
+.settings-index__group > button small { min-width: 18px; padding: 1px 5px; border-radius: 5px; background: var(--surface-deep); color: var(--muted); font-family: var(--font-mono); font-size: var(--text-micro); text-align: center; }
 
 .settings-index > footer {
   display: flex;
@@ -600,7 +600,7 @@
   padding: 10px 9px 2px;
   border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .settings-content {
@@ -613,7 +613,7 @@
   display: block;
   margin-bottom: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 620;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -646,6 +646,8 @@
   background: var(--surface-raised);
 }
 
+.settings-list--appearance { margin-top: 12px; }
+
 .settings-row {
   display: grid;
   min-height: 66px;
@@ -660,6 +662,30 @@
 .settings-row > div:first-child { min-width: 0; }
 .settings-row strong { color: var(--text-soft); font-size: var(--text-label); font-weight: 570; }
 .settings-row p { max-width: 58ch; margin: 4px 0 0; color: var(--muted); font-size: var(--text-micro); line-height: 1.45; }
+
+.settings-choice {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-deep);
+}
+
+.settings-choice button {
+  min-width: 54px;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 570;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.settings-choice button:hover { color: var(--text); }
+.settings-choice button.is-selected { background: var(--surface-raised); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.settings-choice button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 .settings-toggle {
   position: relative;
@@ -732,9 +758,9 @@
 .model-settings-list__icon { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-deep); color: var(--text-soft); font-family: var(--font-mono); font-size: 16px; }
 .model-settings-list article > div { display: grid; min-width: 0; gap: 3px; }
 .model-settings-list article strong { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: var(--text-label); font-weight: 590; }
-.model-settings-list article strong small { padding: 2px 5px; border-radius: 5px; background: var(--info-soft); color: var(--info); font-size: 8px; font-weight: 620; text-transform: uppercase; }
+.model-settings-list article strong small { padding: 2px 5px; border-radius: 5px; background: var(--info-soft); color: var(--info); font-size: var(--text-micro); font-weight: 620; text-transform: uppercase; }
 .model-settings-list article p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted); font-size: var(--text-micro); line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.model-settings-list article code { color: var(--muted); font-family: var(--font-mono); font-size: 9px; }
+.model-settings-list article code { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-micro); }
 .settings-empty { display: grid; min-height: 160px; place-items: center; align-content: center; gap: 5px; color: var(--muted); text-align: center; }
 .settings-empty strong { color: var(--text-soft); font-size: var(--text-label); }
 .settings-empty p { margin: 0; font-size: var(--text-micro); }
@@ -766,7 +792,7 @@
 .runtime-grid > div { display: grid; min-width: 0; gap: 4px; padding: 13px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .runtime-grid > div:nth-child(even) { border-right: 0; }
 .runtime-grid > div:nth-last-child(-n + 2) { border-bottom: 0; }
-.runtime-grid span { color: var(--muted); font-size: 9px; font-weight: 620; letter-spacing: 0.07em; text-transform: uppercase; }
+.runtime-grid span { color: var(--muted); font-size: var(--text-micro); font-weight: 620; letter-spacing: 0.07em; text-transform: uppercase; }
 .runtime-grid strong { overflow: hidden; color: var(--text-soft); font-family: var(--font-mono); font-size: var(--text-label); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-grid small { color: var(--muted); font-size: var(--text-micro); }
 
@@ -776,7 +802,7 @@
 .codex-update-card__copy { display: grid; min-width: 0; gap: 3px; }
 .codex-update-card__copy strong { color: var(--text); font-size: var(--text-label); font-weight: 590; }
 .codex-update-card__copy p { margin: 0; color: var(--muted); font-size: var(--text-micro); line-height: 1.45; }
-.codex-update-card__copy small { color: var(--success); font-size: 9px; }
+.codex-update-card__copy small { color: var(--success); font-size: var(--text-micro); }
 .codex-update-card__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .codex-update-card__actions .button { min-height: 30px; padding: 0 10px; }
 
@@ -785,7 +811,7 @@
 .shortcut-list > div:last-child { border-bottom: 0; }
 .shortcut-list strong { color: var(--text-soft); font-size: var(--text-label); font-weight: 550; }
 .shortcut-list > div > span { display: flex; align-items: center; gap: 4px; }
-.shortcut-list kbd { min-width: 25px; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-deep); color: var(--muted-strong); box-shadow: 0 1px 0 var(--line-strong); font-family: var(--font-mono); font-size: 9px; text-align: center; }
+.shortcut-list kbd { min-width: 25px; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-deep); color: var(--muted-strong); box-shadow: 0 1px 0 var(--line-strong); font-family: var(--font-mono); font-size: var(--text-micro); text-align: center; }
 
 @media (max-width: 820px) {
   .settings-header__runtime { display: none; }

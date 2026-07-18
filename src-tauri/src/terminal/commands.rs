@@ -1,5 +1,8 @@
 use tauri::{AppHandle, State};
 
+use crate::execution::service::resolve_execution_context;
+use crate::xiao::repository::XiaoRepository;
+
 use super::runtime::{TerminalManager, TerminalStartResult};
 
 #[tauri::command]
@@ -7,12 +10,27 @@ pub fn start_terminal(
     app: AppHandle,
     manager: State<'_, TerminalManager>,
     session_id: String,
-    workspace_path: String,
+    project_path: String,
+    task_id: Option<String>,
     shell: String,
     cols: u16,
     rows: u16,
+    repository: State<'_, XiaoRepository>,
 ) -> Result<TerminalStartResult, String> {
-    manager.start(app, session_id, workspace_path, shell, cols, rows)
+    let persisted_task_id = task_id
+        .as_deref()
+        .ok_or("Terminal sessions require a persisted Xiao task.")?;
+    let context = resolve_execution_context(&repository, &project_path, Some(persisted_task_id))?;
+    manager.start(
+        app,
+        session_id,
+        context.project_path,
+        task_id,
+        context.execution_root,
+        shell,
+        cols,
+        rows,
+    )
 }
 
 #[tauri::command]

@@ -11,7 +11,9 @@ import type { SystemInfo, WorkspaceSnapshot } from "../../../core/models/workspa
 type TerminalPanelProps = {
   active: boolean;
   workspace: WorkspaceSnapshot;
+  taskId: string | null;
   system: SystemInfo;
+  transitioning: boolean;
 };
 
 type TerminalOutput = { sessionId: string; data: string };
@@ -48,7 +50,13 @@ const readTerminalTheme = (): ITheme => {
 
 const shellName = (shell: string) => shell.split(/[\\/]/).filter(Boolean).at(-1) ?? shell;
 
-export function TerminalPanel({ active, workspace, system }: TerminalPanelProps) {
+export function TerminalPanel({
+  active,
+  workspace,
+  taskId,
+  system,
+  transitioning,
+}: TerminalPanelProps) {
   const [restartKey, setRestartKey] = useState(0);
   const [status, setStatus] = useState<TerminalStatus>("starting");
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +93,11 @@ export function TerminalPanel({ active, workspace, system }: TerminalPanelProps)
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    if (transitioning) {
+      setStatus("exited");
+      setError("Terminal paused while the task execution root changes.");
+      return;
+    }
 
     const terminal = new Terminal({
       allowTransparency: false,
@@ -161,6 +174,7 @@ export function TerminalPanel({ active, workspace, system }: TerminalPanelProps)
         await nativeBridge.startTerminal(
           sessionId,
           workspace.path,
+          taskId,
           system.shell,
           proposed?.cols ?? 100,
           proposed?.rows ?? 30,
@@ -200,7 +214,14 @@ export function TerminalPanel({ active, workspace, system }: TerminalPanelProps)
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [restartKey, system.shell, workspace.path]);
+  }, [
+    restartKey,
+    system.shell,
+    taskId,
+    transitioning,
+    workspace.execution.executionRoot,
+    workspace.path,
+  ]);
 
   return (
     <section className="shell-workspace shell-workspace--pty">
@@ -209,14 +230,15 @@ export function TerminalPanel({ active, workspace, system }: TerminalPanelProps)
         <div><strong>{workspace.name}</strong><small>{shellName(system.shell)}</small></div>
         <div className="shell-workspace__actions">
           <span className={`shell-workspace__status is-${status}`}><i />{status}</span>
-          <button type="button" onClick={() => terminalRef.current?.clear()}>Clear</button>
-          <button type="button" title="Restart terminal" onClick={() => setRestartKey((key) => key + 1)}>
+          <button type="button" disabled={transitioning} onClick={() => terminalRef.current?.clear()}>Clear</button>
+          <button type="button" disabled={transitioning} title="Restart terminal" onClick={() => setRestartKey((key) => key + 1)}>
             <XiaoIcon name="refresh" size={12} />
           </button>
         </div>
       </header>
-      <div className="shell-workspace__path" title={workspace.path}>
-        <XiaoIcon name="folderOpen" size={12} /><span>{workspace.path}</span>
+      <div className="shell-workspace__path" title={workspace.execution.executionRoot}>
+        <XiaoIcon name="folderOpen" size={12} />
+        <span>{workspace.execution.executionRoot}</span>
       </div>
       <div className="shell-terminal" ref={hostRef} onMouseDown={() => terminalRef.current?.focus()} />
       <footer>

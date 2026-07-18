@@ -7,6 +7,7 @@ import {
 
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import type { AgentModelSummary } from "../../../core/models/agent";
+import { fastServiceTier } from "../../agent/hooks/agentProtocol";
 import { reasoningLabel } from "./ReasoningControl";
 import "./model-picker.css";
 
@@ -14,9 +15,11 @@ type ModelPickerProps = {
   models: AgentModelSummary[];
   selectedModel: string | null;
   selectedReasoningEffort: string | null;
+  fastMode: boolean;
   disabled: boolean;
   onModelChange: (model: string | null) => void;
   onReasoningEffortChange: (effort: string | null) => void;
+  onFastModeChange: (fastMode: boolean) => void;
 };
 
 type OpenMenu = "model" | "reasoning" | null;
@@ -41,9 +44,11 @@ export function ModelPicker({
   models,
   selectedModel,
   selectedReasoningEffort,
+  fastMode,
   disabled,
   onModelChange,
   onReasoningEffortChange,
+  onFastModeChange,
 }: ModelPickerProps) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [query, setQuery] = useState("");
@@ -63,6 +68,11 @@ export function ModelPicker({
   const effectiveEffort = activeModel
     ? selectedReasoningEffort || activeModel.defaultReasoningEffort
     : "";
+  const fastTier = fastServiceTier(activeModel);
+  const fastModeEnabled = Boolean(fastMode && fastTier);
+  const fastModeTitle = fastTier
+    ? `${fastTier.description || "Faster responses with increased usage."} Click to turn Fast mode ${fastModeEnabled ? "off" : "on"}.`
+    : `${activeModel?.displayName ?? "This model"} does not offer Fast mode.`;
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredModels = normalizedQuery
     ? models.filter((model) =>
@@ -263,6 +273,20 @@ export function ModelPicker({
             })}
           </div>
         )}
+      </div>
+
+      <div className="fast-mode" title={fastModeTitle}>
+        <button
+          className={`fast-mode__trigger ${fastModeEnabled ? "is-on" : ""}`}
+          type="button"
+          aria-label={`Fast mode ${fastModeEnabled ? "on" : "off"}`}
+          aria-pressed={fastModeEnabled}
+          disabled={disabled || !fastTier}
+          onClick={() => onFastModeChange(!fastModeEnabled)}
+        >
+          <i aria-hidden="true" />
+          <span>Fast {fastModeEnabled ? "on" : "off"}</span>
+        </button>
       </div>
     </div>
   );

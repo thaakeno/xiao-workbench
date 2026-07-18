@@ -1,5 +1,6 @@
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import type { AgentRuntimeState, RuntimePhase, TimelineEntry } from "../../../core/models/agent";
+import type { RunSnapshot, RunStatus } from "../../../core/models/run";
 import type { WorkspaceSnapshot } from "../../../core/models/workspace";
 import type { FocusView } from "../../focus-rail/focus-rail.types";
 import { ChatExportMenu } from "./ChatExportMenu";
@@ -10,6 +11,7 @@ type TaskHeaderProps = {
   taskArchived: boolean;
   workspace: WorkspaceSnapshot;
   runtime: AgentRuntimeState;
+  latestRun: RunSnapshot | null;
   contextPercent: number | null;
   archiveDisabled: boolean;
   canUndo: boolean;
@@ -17,6 +19,7 @@ type TaskHeaderProps = {
   timeline: TimelineEntry[];
   showChatExport: boolean;
   onFocusView: (view: FocusView) => void;
+  onRetryRun: (runId: string) => void;
   onToggleArchived: () => void;
   onUndo: () => void;
 };
@@ -29,12 +32,26 @@ const runtimeLabels: Record<RuntimePhase, string> = {
   error: "Needs attention",
 };
 
+const runLabels: Partial<Record<RunStatus, string>> = {
+  queued: "Queued",
+  preparing: "Preparing",
+  running: "Working",
+  waiting_for_input: "Waiting for input",
+  verifying: "Verifying",
+  completed: "Done",
+  needs_attention: "Needs attention",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+};
+
 export function TaskHeader({
   taskId,
   taskTitle,
   taskArchived,
   workspace,
   runtime,
+  latestRun,
   contextPercent,
   archiveDisabled,
   canUndo,
@@ -42,23 +59,36 @@ export function TaskHeader({
   timeline,
   showChatExport,
   onFocusView,
+  onRetryRun,
   onToggleArchived,
   onUndo,
 }: TaskHeaderProps) {
   const branch = workspace.git?.branch ?? "No Git branch";
   const taskWorking = runtime.phase === "working" && runtime.taskId === taskId;
-  const runtimeLabel = runtime.phase === "working" && !taskWorking
-    ? "Busy in another task"
-    : runtimeLabels[runtime.phase];
+  const runtimeLabel = latestRun?.status && runLabels[latestRun.status]
+    ? runLabels[latestRun.status]
+    : runtime.phase === "working" && !taskWorking
+      ? "Busy in another task"
+      : runtimeLabels[runtime.phase];
+  const canRetry = latestRun?.status === "failed" || latestRun?.status === "interrupted";
 
   return (
     <header className="task-header">
       <div className="task-header__copy">
         <h1>{taskTitle}</h1>
-        <button className="task-header__branch" onClick={() => onFocusView("changes")}>
-          <XiaoIcon name="branch" size={13} />
-          <span>{branch}</span>
-        </button>
+        <div className="task-header__context-row">
+          <button className="task-header__branch" onClick={() => onFocusView("changes")}>
+            <XiaoIcon name="branch" size={13} />
+            <span>{branch}</span>
+          </button>
+          <span
+            className="task-header__environment"
+            title={workspace.execution.executionRoot}
+          >
+            <XiaoIcon name="workspace" size={12} />
+            {workspace.execution.workspaceMode === "managed-worktree" ? "Isolated" : "Local"}
+          </span>
+        </div>
       </div>
 
       <div className="task-header__actions">
@@ -82,6 +112,16 @@ export function TaskHeader({
           <i style={{ "--usage": `${contextPercent ?? 0}%` } as React.CSSProperties} />
           <span>{contextPercent === null ? "Context" : `${contextPercent}%`}</span>
         </button>
+        {canRetry ? (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={() => onRetryRun(latestRun.id)}
+          >
+            <XiaoIcon name="refresh" size={15} />
+            <span>Retry</span>
+          </button>
+        ) : null}
         <button className="button button--quiet" onClick={() => onFocusView("changes")}>
           <XiaoIcon name="changes" size={16} />
           <span>Review</span>

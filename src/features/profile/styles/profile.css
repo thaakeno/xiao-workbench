@@ -243,7 +243,7 @@
   gap: 8px;
   margin: 0 2px 8px 27px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .profile-heatmap__plot {
@@ -259,7 +259,7 @@
   gap: 3px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--text-micro);
 }
 
 .profile-heatmap__weekdays span:nth-child(1) { grid-row: 2; }
@@ -317,7 +317,7 @@
   gap: 4px;
   margin-top: 10px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .profile-heatmap__legend i {
@@ -390,7 +390,7 @@
 
 .profile-activity__summary dt {
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .profile-activity__summary dd {
@@ -411,7 +411,7 @@
 
 .profile-ledger__total span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .profile-ledger__total strong {

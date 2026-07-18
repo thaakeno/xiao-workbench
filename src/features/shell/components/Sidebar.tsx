@@ -11,7 +11,6 @@ import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import type {
   AgentAccountSummary,
   AgentRateLimits,
-  AgentRuntimeState,
   AgentThreadTokenUsage,
   CodexThreadSummary,
   ThreadChangeSummary,
@@ -30,7 +29,7 @@ type SidebarProps = {
   tasks: WorkbenchTask[];
   activeTaskId: string;
   workspace: WorkspaceSnapshot;
-  runtime: AgentRuntimeState;
+  workingTaskIds: string[];
   account: AgentAccountSummary | null;
   rateLimits: AgentRateLimits | null;
   codexThreads: CodexThreadSummary[];
@@ -143,7 +142,7 @@ export function Sidebar({
   tasks,
   activeTaskId,
   workspace,
-  runtime,
+  workingTaskIds,
   account,
   rateLimits,
   codexThreads,
@@ -206,7 +205,8 @@ export function Sidebar({
     });
   const menuProject = projects.find((project) => project.path === projectMenu?.projectPath);
   const menuTask = tasks.find((task) => task.id === taskMenu?.taskId);
-  const projectSwitchLocked = runtime.phase === "working";
+  const workingTasks = new Set(workingTaskIds);
+  const projectSwitchLocked = workingTasks.size > 0;
   const initials = profileInitials(profile.name);
   const quotaWindows = [
     rateLimits?.primary ? { label: "Session", window: rateLimits.primary } : null,
@@ -520,7 +520,7 @@ export function Sidebar({
             const expanded = active && expandedProjectPath === project.path;
             const menuOpen = projectMenu?.projectPath === project.path;
             const renaming = renamingProject?.path === project.path;
-            const running = active && runtime.phase === "working";
+            const running = active && workingTasks.size > 0;
             const updatedAt = active
               ? Math.max(project.updatedAt, ...visibleTasks.map((task) => task.updatedAt))
               : project.updatedAt;
@@ -648,11 +648,11 @@ export function Sidebar({
                             <div className="task-list">
                               {groupTasks.map((task) => {
                                 const selected = activePage === "tasks" && task.id === activeTaskId;
-                                const taskRunning = task.id === runtime.taskId && runtime.phase === "working";
+                                const taskRunning = workingTasks.has(task.id);
                                 const taskMenuOpen = taskMenu?.taskId === task.id;
                                 const taskMeta = taskRunning
                                   ? "Running"
-                                  : task.meta === "Draft" || (!task.timeline.length && !task.threadId)
+                                  : task.meta === "Draft" || (task.timelineEntryCount === 0 && !task.threadId)
                                     ? "Draft"
                                     : `Updated ${relativeTime(task.updatedAt, now)}`;
                                 const stateLabel = taskRunning
@@ -887,9 +887,9 @@ export function Sidebar({
               </button>
               <button
                 role="menuitem"
-                disabled={menuProject.path === activeProjectPath && runtime.phase === "working"}
+                disabled={menuProject.path === activeProjectPath && workingTasks.size > 0}
                 title={
-                  menuProject.path === activeProjectPath && runtime.phase === "working"
+                  menuProject.path === activeProjectPath && workingTasks.size > 0
                     ? "Wait for the active task to finish"
                     : undefined
                 }
@@ -954,8 +954,8 @@ export function Sidebar({
               </button>
               <button
                 role="menuitem"
-                disabled={runtime.phase === "working" && runtime.taskId === menuTask.id}
-                title={runtime.phase === "working" && runtime.taskId === menuTask.id ? "Wait for this task to finish" : undefined}
+                disabled={workingTasks.has(menuTask.id)}
+                title={workingTasks.has(menuTask.id) ? "Wait for this task to finish" : undefined}
                 onClick={() => {
                   closeTaskMenu();
                   onSetTaskArchived(menuTask.id, true);

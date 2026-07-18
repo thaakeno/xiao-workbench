@@ -26,6 +26,8 @@ fn shell_workspace_path(path: &Path) -> PathBuf {
 }
 
 struct TerminalSession {
+    project_path: String,
+    task_id: Option<String>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -116,6 +118,8 @@ impl TerminalManager {
         &self,
         app: AppHandle,
         session_id: String,
+        project_path: String,
+        task_id: Option<String>,
         workspace_path: String,
         shell: String,
         cols: u16,
@@ -166,6 +170,8 @@ impl TerminalManager {
             .take_writer()
             .map_err(|error| error.to_string())?;
         let session = Arc::new(TerminalSession {
+            project_path,
+            task_id,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             killer: Mutex::new(child.clone_killer()),
@@ -256,6 +262,28 @@ impl TerminalManager {
             .resize(pty_size(cols, rows))
             .map_err(|error| error.to_string());
         result
+    }
+
+    pub(crate) fn stop_for_execution_change(
+        &self,
+        project_path: &str,
+        task_id: &str,
+    ) -> Result<(), String> {
+        let session_ids = self
+            .sessions
+            .lock()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .filter(|(_, session)| {
+                session.project_path == project_path
+                    && session.task_id.as_deref().is_none_or(|id| id == task_id)
+            })
+            .map(|(session_id, _)| session_id.clone())
+            .collect::<Vec<_>>();
+        for session_id in session_ids {
+            self.stop(&session_id)?;
+        }
+        Ok(())
     }
 
     pub fn stop(&self, session_id: &str) -> Result<(), String> {

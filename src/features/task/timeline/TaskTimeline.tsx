@@ -9,6 +9,9 @@ type TaskTimelineProps = {
   runtime: AgentRuntimeState;
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
+  historyLoading: boolean;
+  canFork: boolean;
+  onForkTask: (entryId: string) => void;
   onResolveApproval: (
     taskId: string,
     entryId: string,
@@ -118,6 +121,9 @@ export function TaskTimeline({
   runtime,
   showReasoningSummaries,
   expandToolOutput,
+  historyLoading,
+  canFork,
+  onForkTask,
   taskId,
   onResolveApproval,
   onReviewChanges,
@@ -152,7 +158,10 @@ export function TaskTimeline({
           {historyLoadingOlder ? "Loading older messages" : "Load older messages"}
         </button>
       ) : null}
-      {!displayTimeline.length ? (
+      {historyLoading ? (
+        <div className="timeline__history-loading">Loading earlier task activity…</div>
+      ) : null}
+      {!displayTimeline.length && !historyLoading ? (
         <div className="timeline__empty">
           <span className="timeline__empty-mark"><XiaoIcon name="command" size={22} /></span>
           <h2>What are we building?</h2>
@@ -177,6 +186,8 @@ export function TaskTimeline({
               taskId={taskId}
               onResolveApproval={onResolveApproval}
               onReviewChanges={onReviewChanges}
+              canFork={canFork}
+              onForkTask={onForkTask}
               canUndo={canUndo && row.entry.id === latestChangeId}
               undoing={undoing && row.entry.id === latestChangeId}
               onUndo={onUndo}

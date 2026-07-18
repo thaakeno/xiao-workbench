@@ -8,6 +8,8 @@ type ActivityItemProps = {
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
   taskId: string;
+  canFork: boolean;
+  onForkTask: (entryId: string) => void;
   onResolveApproval: (
     taskId: string,
     entryId: string,
@@ -15,9 +17,9 @@ type ActivityItemProps = {
     decision: "accept" | "decline",
   ) => Promise<void>;
   onReviewChanges: () => void;
-  canUndo: boolean;
-  undoing: boolean;
-  onUndo: () => void;
+  canUndo?: boolean;
+  undoing?: boolean;
+  onUndo?: () => void;
 };
 
 const iconByKind: Record<TimelineEntry["kind"], XiaoIconName> = {
@@ -94,11 +96,13 @@ export function ActivityItem({
   showReasoningSummaries,
   expandToolOutput,
   taskId,
+  canFork,
+  onForkTask,
   onResolveApproval,
   onReviewChanges,
-  canUndo,
-  undoing,
-  onUndo,
+  canUndo = false,
+  undoing = false,
+  onUndo = () => undefined,
 }: ActivityItemProps) {
   const waitingForApproval = entry.kind === "approval" && entry.status === "warning";
   const userMessage = entry.kind === "brief" || entry.kind === "user";
@@ -149,6 +153,18 @@ export function ActivityItem({
               })}
             </div>
           )}
+          {entry.kind === "user" && canFork ? (
+            <div className="activity__user-actions">
+              <button
+                type="button"
+                title="Create a new task from the conversation before this prompt"
+                onClick={() => onForkTask(entry.id)}
+              >
+                <XiaoIcon name="branch" size={12} />
+                Fork from here
+              </button>
+            </div>
+          ) : null}
         </div>
       </article>
     );

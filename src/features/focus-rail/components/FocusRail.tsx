@@ -12,6 +12,7 @@ import {
   type ThreadTokenUsage,
   type TimelineEntry,
 } from "../../../core/models/agent";
+import type { RoutineSummary } from "../../../core/models/routine";
 import type { FileNode, SystemInfo, WorkspaceSnapshot } from "../../../core/models/workspace";
 import type { WorkbenchTask } from "../../task/task.types";
 import type { FocusView } from "../focus-rail.types";
@@ -21,7 +22,7 @@ import { ExtensionsPanel } from "./ExtensionsPanel";
 import { OpenFilePanel } from "./OpenFilePanel";
 import { PlanPanel } from "./PlanPanel";
 import { RuntimePanel } from "./RuntimePanel";
-import { SchedulePanel, type ScheduledTask } from "./SchedulePanel";
+import { SchedulePanel, type RoutineDraft } from "./SchedulePanel";
 import "../styles/focus-rail.css";
 
 const TerminalPanel = lazy(() =>
@@ -42,6 +43,8 @@ type FocusRailProps = {
   system: SystemInfo;
   runtime: AgentRuntimeState;
   task: WorkbenchTask;
+  executionTaskId: string | null;
+  executionTransitioning: boolean;
   timeline: TimelineEntry[];
   models: AgentModelSummary[];
   contextUsage: ThreadTokenUsage | null;
@@ -51,9 +54,21 @@ type FocusRailProps = {
   error: string | null;
   onRefresh: () => void;
   onLoadDirectory: (path: string) => Promise<FileNode[]>;
-  scheduledTasks: ScheduledTask[];
-  onScheduleTask: (prompt: string, runAt: number) => void;
-  onRemoveScheduledTask: (id: string) => void;
+  routines: RoutineSummary[];
+  routinesLoading: boolean;
+  routinesError: string | null;
+  routineCreating: boolean;
+  routineBusyIds: ReadonlySet<string>;
+  routineOpenRunId: string | null;
+  nativeRoutinesAvailable: boolean;
+  dangerousRoutineAccessDefault: boolean;
+  dangerousRoutineIds: ReadonlySet<string>;
+  onCreateRoutine: (draft: RoutineDraft) => Promise<void>;
+  onUpdateRoutine: (routineId: string, draft: RoutineDraft) => Promise<void>;
+  onSetRoutineEnabled: (routineId: string, enabled: boolean) => Promise<void>;
+  onRunRoutineNow: (routineId: string) => Promise<void>;
+  onDeleteRoutine: (routineId: string) => Promise<void>;
+  onClearRoutineError: () => void;
   reviewContext: AgentAttachment[];
   onStageReviewContext: (attachment: AgentAttachment) => void;
   onRemoveReviewContext: (attachmentId: string) => void;
@@ -82,6 +97,8 @@ export function FocusRail({
   system,
   runtime,
   task,
+  executionTaskId,
+  executionTransitioning,
   timeline,
   models,
   contextUsage,
@@ -91,9 +108,21 @@ export function FocusRail({
   error,
   onRefresh,
   onLoadDirectory,
-  scheduledTasks,
-  onScheduleTask,
-  onRemoveScheduledTask,
+  routines,
+  routinesLoading,
+  routinesError,
+  routineCreating,
+  routineBusyIds,
+  routineOpenRunId,
+  nativeRoutinesAvailable,
+  dangerousRoutineAccessDefault,
+  dangerousRoutineIds,
+  onCreateRoutine,
+  onUpdateRoutine,
+  onSetRoutineEnabled,
+  onRunRoutineNow,
+  onDeleteRoutine,
+  onClearRoutineError,
   reviewContext,
   onStageReviewContext,
   onRemoveReviewContext,
@@ -204,7 +233,14 @@ export function FocusRail({
       </header>
 
       <div className={`focus-panel focus-panel--${activeView}`}>
-        {activeView === "changes" && <ChangesPanel workspace={workspace} onRefresh={onRefresh} />}
+        {activeView === "changes" && (
+          <ChangesPanel
+            workspace={workspace}
+            taskId={executionTaskId}
+            transitioning={executionTransitioning}
+            onRefresh={onRefresh}
+          />
+        )}
         {activeView === "context" && (
           <ContextPanel
             key={task.id}
@@ -220,6 +256,7 @@ export function FocusRail({
         {activeView === "files" && (
           <OpenFilePanel
             workspace={workspace}
+            taskId={executionTaskId}
             loading={loading}
             activeFile={activeFile}
             onActiveFileChange={setActiveFile}
@@ -230,11 +267,19 @@ export function FocusRail({
           />
         )}
         {activeView === "plan" && <PlanPanel runtime={runtime} plan={plan} />}
-        {activeView === "extensions" && <ExtensionsPanel workspace={workspace} runtime={runtime} />}
+        {activeView === "extensions" && (
+          <ExtensionsPanel workspace={workspace} taskId={executionTaskId} runtime={runtime} />
+        )}
         {(terminalOpened || activeView === "terminal") && (
           <div className="focus-terminal-slot" hidden={activeView !== "terminal"}>
             <Suspense fallback={<div className="terminal-loading"><XiaoIcon name="pending" size={15} /> Starting terminal</div>}>
-              <TerminalPanel active={activeView === "terminal"} workspace={workspace} system={system} />
+              <TerminalPanel
+                active={activeView === "terminal"}
+                workspace={workspace}
+                taskId={executionTaskId}
+                system={system}
+                transitioning={executionTransitioning}
+              />
             </Suspense>
           </div>
         )}
@@ -256,7 +301,25 @@ export function FocusRail({
             </Suspense>
           </div>
         )}
-        {activeView === "schedule" && <SchedulePanel tasks={scheduledTasks} onAdd={onScheduleTask} onRemove={onRemoveScheduledTask} />}
+        {activeView === "schedule" && (
+          <SchedulePanel
+            routines={routines}
+            loading={routinesLoading}
+            error={routinesError}
+            creating={routineCreating}
+            busyIds={routineBusyIds}
+            nativeAvailable={nativeRoutinesAvailable}
+            dangerousAccessDefault={dangerousRoutineAccessDefault}
+            dangerousRoutineIds={dangerousRoutineIds}
+            openRunId={routineOpenRunId}
+            onCreate={onCreateRoutine}
+            onUpdate={onUpdateRoutine}
+            onSetEnabled={onSetRoutineEnabled}
+            onRunNow={onRunRoutineNow}
+            onDelete={onDeleteRoutine}
+            onClearError={onClearRoutineError}
+          />
+        )}
         {activeView === "runtime" && (
           <RuntimePanel runtime={runtime} logs={runtimeLogs} system={system} error={error} onRefresh={onRefresh} />
         )}

@@ -1,12 +1,14 @@
 {
   "name": "xiao-workbench",
   "private": true,
-  "version": "0.0.0-day07152026",
+  "version": "0.0.0-day07162026",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "probe:codex": "node scripts/probe-codex-app-server.mjs",
     "tauri": "tauri",
     "check": "tsc -b --pretty false",
     "test": "vitest run"
