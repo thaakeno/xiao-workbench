@@ -997,11 +997,17 @@ export function App() {
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") refreshLimits();
     };
-    timer = window.setInterval(refreshLimits, 60_000);
+    const scheduleRefresh = () => {
+      timer = window.setTimeout(() => {
+        refreshLimits();
+        scheduleRefresh();
+      }, 60_000);
+    };
+    scheduleRefresh();
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [preferences.importCodexHistory]);
@@ -2526,7 +2532,7 @@ export function App() {
               executionTaskId={executionTaskId}
               taskTitle={activeTask.title}
               taskArchived={activeTask.archived}
-              cliVersion={activeTask.threadBinding?.cliVersion ?? null}
+              cliVersion={system.codexVersion ?? activeTask.threadBinding?.cliVersion ?? null}
               launchMode={focusedLaunch}
               taskStateError={taskStateError}
               taskStateLoading={activeTaskHistoryLoading}
