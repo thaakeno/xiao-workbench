@@ -790,30 +790,28 @@ export function Sidebar({
           ) : null}
         </div>
 
-        {quotaWindows.length ? (
-          <section className="sidebar-usage" aria-label="Codex usage remaining">
-            <button className="sidebar-usage__open" type="button" onClick={() => setUsageDetailsOpen(true)}>
-              <span><XiaoIcon name="runtime" size={13} />Usage remaining</span>
-              <XiaoIcon name="caret" size={12} />
-            </button>
-            {quotaWindows.map(({ label, window }) => {
-              const remaining = Math.max(0, Math.min(100, Number((100 - window.usedPercent).toFixed(1))));
-              const urgency = remaining < 10 ? "is-critical" : remaining < 30 ? "is-warning" : "";
-              const reset = window.resetsAt
-                ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-                    .format(new Date(window.resetsAt * 1_000))
-                : null;
-              return (
-                <div className={`sidebar-usage__row ${urgency}`} key={label}>
-                  <strong>{label}</strong>
-                  <span>{remaining}%</span>
-                  {reset ? <small>{reset}</small> : null}
-                  <i><b style={{ width: `${remaining}%` }} /></i>
-                </div>
-              );
-            })}
-          </section>
-        ) : null}
+        <section className="sidebar-usage" aria-label="Codex usage remaining">
+          <button className="sidebar-usage__open" type="button" onClick={() => setUsageDetailsOpen(true)}>
+            <span><XiaoIcon name="runtime" size={13} />Usage remaining</span>
+            <XiaoIcon name="caret" size={12} />
+          </button>
+          {quotaWindows.length ? quotaWindows.map(({ label, window }) => {
+            const remaining = Math.max(0, Math.min(100, Number((100 - window.usedPercent).toFixed(1))));
+            const urgency = remaining < 10 ? "is-critical" : remaining < 30 ? "is-warning" : "";
+            const reset = window.resetsAt
+              ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
+                  .format(new Date(window.resetsAt * 1_000))
+              : null;
+            return (
+              <div className={`sidebar-usage__row ${urgency}`} key={label}>
+                <strong>{label}</strong>
+                <span>{remaining}%</span>
+                {reset ? <small>{reset}</small> : null}
+                <i><b style={{ width: `${remaining}%` }} /></i>
+              </div>
+            );
+          }) : <small className="sidebar-usage__pending">Limits will appear when Codex connects</small>}
+        </section>
 
         <nav className="sidebar__secondary-nav" aria-label="Utilities">
           <button

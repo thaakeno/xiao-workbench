@@ -95,8 +95,11 @@ const projectPreferencesStorageKey = "xiao.projects.v1";
 const activeProjectStorageKey = "xiao.active-project.v1";
 const codexThreadSnapshotStorageKey = "xiao.codex-thread-snapshot.v1";
 const usageSnapshotStorageKey = "xiao.usage-snapshot.v1";
+const rateLimitsSnapshotStorageKey = "xiao.rate-limits-snapshot.v1";
 const changeSummarySnapshotStorageKey = "xiao.thread-change-summaries.v1";
 const projectPathKey = (path: string) => path.replace(/[\\/]+$/, "").toLocaleLowerCase();
+const isGeneratedCodexWorkspace = (path: string) =>
+  /\/documents\/codex\/\d{4}-\d{2}-\d{2}(?:\/|$)/i.test(path.replaceAll("\\", "/"));
 const comparableWorkspacePath = (path: string) =>
   path.replaceAll("\\", "/").replace(/\/$/, "").toLocaleLowerCase();
 const readSnapshot = <T,>(key: string, fallback: T): T => {
@@ -649,7 +652,10 @@ const upsertCodexTask = (current: WorkbenchTask[], thread: CodexThreadSummary) =
 
 export function App() {
   const { profile, saveProfile } = useLocalProfile();
-  const [activeProjectPath, setActiveProjectPath] = useState<string | undefined>(readActiveProjectPath);
+  const [activeProjectPath, setActiveProjectPath] = useState<string | undefined>(() => {
+    const path = readActiveProjectPath();
+    return path && !isGeneratedCodexWorkspace(path) ? path : undefined;
+  });
   const { theme, setTheme } = useTheme();
   const { preferences, updatePreferences, updateTaskRunDefaults } = useAppPreferences();
   const codexUpdate = useCodexUpdate();
@@ -699,7 +705,10 @@ export function App() {
   const notifiedApprovalRef = useRef<string | null>(null);
   const notifiedQuestionRef = useRef<string | null>(null);
   const [projects, setProjects] = useState<XiaoProjectSummary[]>(() =>
-    applyProjectPreferences(readStartupProjects(), readProjectPreferences()),
+    applyProjectPreferences(
+      readStartupProjects().filter((project) => !isGeneratedCodexWorkspace(project.path)),
+      readProjectPreferences(),
+    ),
   );
   const managedProjectPathsRef = useRef(new Set<string>());
   const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>(() =>
@@ -708,7 +717,9 @@ export function App() {
   const [threadTokenUsage, setThreadTokenUsage] = useState<AgentThreadTokenUsage[]>(() =>
     readSnapshot(usageSnapshotStorageKey, []),
   );
-  const [rateLimits, setRateLimits] = useState<AgentRateLimits | null>(null);
+  const [rateLimits, setRateLimits] = useState<AgentRateLimits | null>(() =>
+    readSnapshot(rateLimitsSnapshotStorageKey, null),
+  );
   const prefetchedCodexThreadsRef = useRef(new Set<string>());
   const [threadChangeSummaries, setThreadChangeSummaries] = useState<
     Record<string, ThreadChangeSummary | null>
@@ -897,7 +908,9 @@ export function App() {
         );
         setProjects((current) => {
           const next = applyProjectPreferences(
-            current.reduce((merged, project) => mergeProject(merged, project), visible),
+            current
+              .filter((project) => !isGeneratedCodexWorkspace(project.path))
+              .reduce((merged, project) => mergeProject(merged, project), visible),
             projectPreferencesRef.current,
           );
           writeStartupProjects(next);
@@ -917,80 +930,29 @@ export function App() {
     }
     if (!isTauriHost()) return;
     let cancelled = false;
-    void Promise.all([
-      listCodexThreads(),
-      nativeBridge.readAgentThreadUsage(),
-      nativeBridge.readCodexRateLimits().catch(() => null),
-    ])
-      .then(([threads, usage, limits]) => {
+    void listCodexThreads()
+      .then((threads) => {
         if (cancelled) return;
         codexHistoryRefreshRef.current = Date.now();
         setCodexThreads(threads);
-        setThreadTokenUsage(usage);
-        setRateLimits(limits ? readRateLimits(limits) : null);
         writeSnapshot(codexThreadSnapshotStorageKey, threads);
-        writeSnapshot(usageSnapshotStorageKey, usage);
-        const threadCounts = new Map<string, { path: string; count: number; updatedAt: number }>();
-        for (const thread of threads) {
-          if (thread.archived || !thread.cwd.trim()) continue;
-          const key = projectPathKey(thread.cwd);
-          const current = threadCounts.get(key);
-          threadCounts.set(key, {
-            path: thread.cwd,
-            count: (current?.count ?? 0) + 1,
-            updatedAt: Math.max(current?.updatedAt ?? 0, thread.updatedAt),
-          });
-        }
-        const historyProjects = [...threadCounts.values()]
-          .filter(({ count }) => count >= 2)
-          .map(({ path, count, updatedAt }): XiaoProjectSummary => ({
-            path,
-            name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
-            updatedAt,
-            taskCount: count,
-          }));
-        setProjects((current) => {
-          const next = applyProjectPreferences(
-            historyProjects.reduce((merged, project) => mergeProject(merged, project), current),
-            projectPreferencesRef.current,
-          );
-          writeStartupProjects(next);
-          return next;
-        });
       })
       .catch((reason) => {
         if (!cancelled) console.error("Could not load local Codex history.", reason);
       });
+    void nativeBridge.readAgentThreadUsage().then((usage) => {
+      if (cancelled) return;
+      setThreadTokenUsage(usage);
+      writeSnapshot(usageSnapshotStorageKey, usage);
+    }).catch(() => undefined);
+    void nativeBridge.readCodexRateLimits().then((response) => {
+      if (cancelled) return;
+      const limits = readRateLimits(response);
+      setRateLimits(limits);
+      writeSnapshot(rateLimitsSnapshotStorageKey, limits);
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [preferences.importCodexHistory]);
-
-  useEffect(() => {
-    if (!preferences.importCodexHistory) return;
-    const pending = codexThreads
-      .filter((thread) => !thread.archived && !(thread.id in threadChangeSummaries))
-      .slice(0, 40);
-    if (!pending.length) return;
-    let cancelled = false;
-    const queue = [...pending];
-    const discovered: Record<string, ThreadChangeSummary | null> = {};
-    const worker = async () => {
-      while (!cancelled) {
-        const thread = queue.shift();
-        if (!thread) return;
-        try { discovered[thread.id] = await readCodexThreadChangeSummary(thread.id); }
-        catch { discovered[thread.id] = null; }
-      }
-    };
-    void Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker)).then(() => {
-      if (cancelled) return;
-      setThreadChangeSummaries((current) => {
-        const next = { ...current, ...discovered };
-        writeSnapshot(changeSummarySnapshotStorageKey, next);
-        return next;
-      });
-    });
-    return () => { cancelled = true; };
-  }, [codexThreads, preferences.importCodexHistory, threadChangeSummaries]);
 
   useEffect(() => {
     if (!hydrationPath || nativeWorkspaceLoadedRef.current.has(hydrationPath)) return;
@@ -1365,30 +1327,6 @@ export function App() {
   }, [tasks]);
 
   useEffect(() => {
-    if (!preferences.importCodexHistory || !taskStateReady) return;
-    const threadIds = tasks.flatMap((task) =>
-      task.origin === "codex" && task.threadId && !task.timelineLoaded ? [task.threadId] : [],
-    );
-    if (!threadIds.length) return;
-    let cancelled = false;
-    const warm = () => {
-      void (async () => {
-        for (const threadId of threadIds) {
-          if (cancelled || prefetchedCodexThreadsRef.current.has(threadId)) continue;
-          prefetchedCodexThreadsRef.current.add(threadId);
-          try { await prefetchCodexThreadTimeline(threadId); }
-          catch { prefetchedCodexThreadsRef.current.delete(threadId); }
-        }
-      })();
-    };
-    const idle = window.requestIdleCallback(warm, { timeout: 1_200 });
-    return () => {
-      cancelled = true;
-      window.cancelIdleCallback(idle);
-    };
-  }, [preferences.importCodexHistory, taskStateReady, taskWorkspacePath, tasks]);
-
-  useEffect(() => {
     if (
       !preferences.importCodexHistory ||
       !taskStateReady ||
@@ -1419,15 +1357,18 @@ export function App() {
         catch { discovered[thread.id] = null; }
       }
     };
-    void Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker)).then(() => {
+    const timer = window.setTimeout(() => void worker().then(() => {
       if (cancelled) return;
       setThreadChangeSummaries((current) => {
         const next = { ...current, ...discovered };
         writeSnapshot(changeSummarySnapshotStorageKey, next);
         return next;
       });
-    });
-    return () => { cancelled = true; };
+    }), 2_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [agent.runtime.phase, codexThreads, preferences.importCodexHistory, threadChangeSummaries, workspace.path]);
 
   const loadOlderCodexHistory = useCallback(async () => {

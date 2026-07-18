@@ -1207,6 +1207,14 @@
   color: var(--text-soft);
 }
 
+.sidebar-usage__pending {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-usage__row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
