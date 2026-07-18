@@ -30,6 +30,7 @@ type McpServerResponse = Omit<McpServer, "displayName" | "toolCount"> & {
 };
 type CapabilitySource = "apps" | "mcp" | "plugins" | "skills";
 type CapabilityIssue = { message: string; tone: "error" | "notice" };
+type CapabilitySnapshot = { skills: Skill[]; plugins: Plugin[]; apps: App[]; mcpServers: McpServer[] };
 
 type ExtensionsPanelProps = {
   workspace: WorkspaceSnapshot;
@@ -70,12 +71,38 @@ const pluginAction = (plugin: Plugin) => {
   return "Install";
 };
 
+const capabilityCacheKey = (path: string) => `xiao.capabilities.v2:${path.toLocaleLowerCase()}`;
+const readCapabilitySnapshot = (path: string): CapabilitySnapshot => {
+  try {
+    const value = JSON.parse(localStorage.getItem(capabilityCacheKey(path)) ?? "null") as Partial<CapabilitySnapshot> | null;
+    return {
+      skills: Array.isArray(value?.skills) ? value.skills : [],
+      plugins: Array.isArray(value?.plugins) ? value.plugins : [],
+      apps: Array.isArray(value?.apps) ? value.apps : [],
+      mcpServers: Array.isArray(value?.mcpServers) ? value.mcpServers : [],
+    };
+  } catch {
+    return { skills: [], plugins: [], apps: [], mcpServers: [] };
+  }
+};
+const decodeBase64 = (value: string) => new TextDecoder().decode(Uint8Array.from(atob(value), (character) => character.charCodeAt(0)));
+const encodeBase64 = (value: string) => {
+  let binary = "";
+  new TextEncoder().encode(value).forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+};
+const withTimeout = <T,>(promise: Promise<T>, milliseconds: number, label: string) => Promise.race([
+  promise,
+  new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error(`${label} timed out; cached data is still shown.`)), milliseconds)),
+]);
+
 export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelProps) {
   const runtimeAvailable = runtime.phase === "ready" || runtime.phase === "working";
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [apps, setApps] = useState<App[]>([]);
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const initialSnapshot = useMemo(() => readCapabilitySnapshot(workspace.path), [workspace.path]);
+  const [skills, setSkills] = useState<Skill[]>(initialSnapshot.skills);
+  const [plugins, setPlugins] = useState<Plugin[]>(initialSnapshot.plugins);
+  const [apps, setApps] = useState<App[]>(initialSnapshot.apps);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>(initialSnapshot.mcpServers);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -83,6 +110,18 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
   const [issues, setIssues] = useState<Partial<Record<CapabilitySource, CapabilityIssue>>>({});
   const refreshEpoch = useRef(0);
   const appAccessBlocked = useRef(false);
+  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [skillSource, setSkillSource] = useState("");
+  const [editorBusy, setEditorBusy] = useState(false);
+
+  useEffect(() => {
+    const snapshot = readCapabilitySnapshot(workspace.path);
+    setSkills(snapshot.skills); setPlugins(snapshot.plugins); setApps(snapshot.apps); setMcpServers(snapshot.mcpServers);
+  }, [workspace.path]);
+
+  useEffect(() => {
+    localStorage.setItem(capabilityCacheKey(workspace.path), JSON.stringify({ skills, plugins, apps, mcpServers }));
+  }, [apps, mcpServers, plugins, skills, workspace.path]);
 
   const refresh = useCallback(async (force = false) => {
     const requestId = ++refreshEpoch.current;
@@ -91,7 +130,7 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
       setLoading(false);
       return;
     }
-    setLoading(true);
+    setLoading(!skills.length && !plugins.length && !apps.length && !mcpServers.length);
     setError(null);
     try {
       const appRequest = appAccessBlocked.current && !force
@@ -115,11 +154,11 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
           { cwds: [workspace.path] },
           { projectPath: workspace.path, taskId },
         ),
-        nativeBridge.agentRequest<{ data: McpServerResponse[] }>(
+        withTimeout(nativeBridge.agentRequest<{ data: McpServerResponse[] }>(
           "mcpServerStatus/list",
           { detail: "toolsAndAuthOnly", limit: 100 },
           { projectPath: workspace.path, taskId },
-        ),
+        ), 2_500, "MCP status"),
         appRequest,
       ]);
       if (requestId !== refreshEpoch.current) return;
@@ -128,7 +167,6 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
       if (skillResult.status === "fulfilled") {
         setSkills(skillResult.value.data.flatMap((entry) => entry.skills));
       } else {
-        setSkills([]);
         nextIssues.skills = sourceIssue("skills", skillResult.reason);
       }
       if (pluginResult.status === "fulfilled") {
@@ -148,7 +186,6 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
           };
         }
       } else {
-        setPlugins([]);
         nextIssues.plugins = sourceIssue("plugins", pluginResult.reason);
       }
       if (mcpResult.status === "fulfilled") {
@@ -159,7 +196,6 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
           authStatus: server.authStatus,
         })));
       } else {
-        setMcpServers([]);
         nextIssues.mcp = sourceIssue("mcp", mcpResult.reason);
       }
       if (appResult.status === "fulfilled" && appResult.value) {
@@ -167,7 +203,6 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
         setApps(appResult.value.data);
       } else if (appResult.status === "rejected") {
         appAccessBlocked.current = isAccessDenied(appResult.reason);
-        setApps([]);
         nextIssues.apps = sourceIssue("apps", appResult.reason);
       } else {
         nextIssues.apps = sourceIssue("apps", null);
@@ -178,7 +213,7 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
     } finally {
       if (requestId === refreshEpoch.current) setLoading(false);
     }
-  }, [runtimeAvailable, taskId, workspace.execution.executionRoot, workspace.path]);
+  }, [apps.length, mcpServers.length, plugins.length, runtimeAvailable, skills.length, taskId, workspace.execution.executionRoot, workspace.path]);
 
   useEffect(() => {
     void refresh();
@@ -231,6 +266,45 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
     }
   };
 
+  const openSkillEditor = async (skill: Skill) => {
+    if (!taskId) return;
+    setEditingSkill(skill);
+    setSkillSource("");
+    setEditorBusy(true);
+    setError(null);
+    try {
+      const response = await nativeBridge.agentRequest<{ dataBase64: string }>(
+        "fs/readFile",
+        { path: skill.path },
+        { projectPath: workspace.path, taskId },
+      );
+      setSkillSource(decodeBase64(response.dataBase64));
+    } catch (reason) {
+      setError(conciseError(reason));
+      setEditingSkill(null);
+    } finally {
+      setEditorBusy(false);
+    }
+  };
+
+  const saveSkill = async () => {
+    if (!editingSkill || !taskId) return;
+    setEditorBusy(true);
+    try {
+      await nativeBridge.agentRequest(
+        "fs/writeFile",
+        { path: editingSkill.path, dataBase64: encodeBase64(skillSource) },
+        { projectPath: workspace.path, taskId },
+      );
+      setEditingSkill(null);
+      await refresh(true);
+    } catch (reason) {
+      setError(conciseError(reason));
+    } finally {
+      setEditorBusy(false);
+    }
+  };
+
   const normalized = query.trim().toLowerCase();
   const filter = <T extends { name: string }>(items: T[]) =>
     normalized ? items.filter((item) => item.name.toLowerCase().includes(normalized)) : items;
@@ -258,7 +332,8 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
             {visible.skills.map((skill) => (
               <CapabilityRow key={skill.path} name={skill.name} description={skill.description} active={skill.enabled}
                 busy={busy === `skill:${skill.path}`} action={skill.enabled ? "Disable" : "Enable"}
-                onAction={() => void updateSkill(skill)} />
+                onAction={() => void updateSkill(skill)} secondaryAction="Edit"
+                onSecondaryAction={() => void openSkillEditor(skill)} />
             ))}
           </CapabilityGroup>
           <CapabilityGroup title={`Plugins (${visible.plugins.length})`} empty="No plugins found." issue={issues.plugins}>
@@ -284,6 +359,23 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
           </CapabilityGroup>
         </>
       )}
+      {editingSkill ? (
+        <div className="skill-editor-backdrop" role="presentation" onPointerDown={(event) => {
+          if (event.currentTarget === event.target && !editorBusy) setEditingSkill(null);
+        }}>
+          <section className="skill-editor" role="dialog" aria-modal="true" aria-label={`Edit ${editingSkill.name}`}>
+            <header>
+              <div><span>Skill instructions</span><strong>{editingSkill.name}</strong><small>{editingSkill.path}</small></div>
+              <button className="icon-button" type="button" disabled={editorBusy} onClick={() => setEditingSkill(null)} aria-label="Close editor"><XiaoIcon name="close" size={16} /></button>
+            </header>
+            <div className="skill-editor__surface">
+              <div className="skill-editor__gutter" aria-hidden="true">{skillSource.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>
+              <textarea aria-label="Skill Markdown instructions" spellCheck={false} value={skillSource} disabled={editorBusy && !skillSource} onChange={(event) => setSkillSource(event.target.value)} />
+            </div>
+            <footer><small>Markdown · saved directly to your local Codex skill</small><button className="button button--quiet" type="button" disabled={editorBusy} onClick={() => setEditingSkill(null)}>Cancel</button><button className="button" type="button" disabled={editorBusy || !skillSource.trim()} onClick={() => void saveSkill()}>{editorBusy ? "Saving…" : "Save skill"}</button></footer>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -314,13 +406,14 @@ function CapabilityGroup({ title, children, empty, issue }: {
   );
 }
 
-function CapabilityRow({ name, description, active, busy, action, onAction }: {
-  name: string; description: string; active: boolean; busy?: boolean; action?: string; onAction?: () => void;
+function CapabilityRow({ name, description, active, busy, action, onAction, secondaryAction, onSecondaryAction }: {
+  name: string; description: string; active: boolean; busy?: boolean; action?: string; onAction?: () => void; secondaryAction?: string; onSecondaryAction?: () => void;
 }) {
   return (
     <article className="capability-row">
       <span className={active ? "is-active" : ""}><XiaoIcon name="capability" size={15} /></span>
       <div><strong>{name}</strong><small>{description}</small></div>
+      {secondaryAction && <button className="button button--quiet" type="button" onClick={onSecondaryAction}>{secondaryAction}</button>}
       {action && <button className="button button--quiet" type="button" disabled={busy} onClick={onAction}>{busy ? "…" : action}</button>}
     </article>
   );

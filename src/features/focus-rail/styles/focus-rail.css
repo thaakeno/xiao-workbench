@@ -109,6 +109,18 @@
 .capability-row strong { overflow: hidden; font-size: var(--text-label); font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
 .capability-row small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: var(--text-micro); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .capability-row .button { height: 28px; padding: 0 7px; font-size: var(--text-micro); }
+.skill-editor-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, #050505 66%, transparent); backdrop-filter: blur(8px); }
+.skill-editor { display: grid; width: min(900px, 92vw); height: min(720px, 86vh); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-panel); animation: picker-menu-in 150ms ease-out both; }
+.skill-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 17px 18px; border-bottom: 1px solid var(--line); }
+.skill-editor > header > div { display: grid; min-width: 0; gap: 3px; }
+.skill-editor > header span { color: var(--muted); font-size: var(--text-micro); font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
+.skill-editor > header strong { font-size: var(--text-title); }
+.skill-editor > header small { overflow: hidden; color: var(--muted); font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.skill-editor__surface { display: grid; min-height: 0; grid-template-columns: 48px minmax(0, 1fr); overflow: auto; background: var(--surface-deep); }
+.skill-editor__gutter { display: flex; flex-direction: column; align-items: end; padding: 16px 11px; border-right: 1px solid var(--line); color: var(--muted); font: 12px/1.65 var(--font-mono); user-select: none; }
+.skill-editor textarea { min-width: 0; min-height: 100%; resize: none; padding: 16px; border: 0; outline: 0; background: transparent; color: var(--text); caret-color: var(--accent); font: 13px/1.65 var(--font-mono); tab-size: 2; }
+.skill-editor > footer { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.skill-editor > footer small { min-width: 0; flex: 1; color: var(--muted); }
 .capability-state { margin: 0; padding: 13px 11px; color: var(--muted); font-size: var(--text-micro); line-height: 1.45; }
 .capability-state:not(:last-child) { border-bottom: 1px solid var(--line); }
 .capability-state.is-error { color: var(--danger); }
