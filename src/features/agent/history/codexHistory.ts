@@ -15,15 +15,7 @@ type RawThread = {
   createdAt?: unknown;
   updatedAt?: unknown;
   recencyAt?: unknown;
-  turns?: unknown;
 };
-
-type ThreadListResponse = {
-  data?: unknown;
-  nextCursor?: unknown;
-};
-
-const SOURCE_KINDS = ["cli", "vscode", "appServer"];
 
 const cleanTitle = (name: unknown, preview: unknown) => {
   const named = typeof name === "string" ? name.trim() : "";
@@ -53,23 +45,13 @@ const threadSummary = (thread: RawThread, archived: boolean): CodexThreadSummary
   };
 };
 
-const listPage = async (archived: boolean, cursor: string | null) =>
-  nativeBridge.agentRequest<ThreadListResponse>("thread/list", {
-    archived,
-    cursor,
-    limit: 100,
-    sortKey: "recency_at",
-    sortDirection: "desc",
-    sourceKinds: SOURCE_KINDS,
-  });
-
 export const listCodexThreads = async (): Promise<CodexThreadSummary[]> => {
   const results: CodexThreadSummary[] = [];
   for (const archived of [false, true]) {
     let cursor: string | null = null;
     const seen = new Set<string>();
     do {
-      const response = await listPage(archived, cursor);
+      const response = await nativeBridge.listCodexThreadsPage(archived, cursor);
       const rows = Array.isArray(response.data) ? response.data : [];
       for (const row of rows) {
         if (!row || typeof row !== "object") continue;
@@ -82,8 +64,9 @@ export const listCodexThreads = async (): Promise<CodexThreadSummary[]> => {
       cursor = next;
     } while (cursor);
   }
-  return [...new Map(results.map((thread) => [thread.id, thread])).values()]
-    .sort((left, right) => right.updatedAt - left.updatedAt);
+  return [...new Map(results.map((thread) => [thread.id, thread])).values()].sort(
+    (left, right) => right.updatedAt - left.updatedAt,
+  );
 };
 
 const userEntry = (
@@ -95,32 +78,29 @@ const userEntry = (
   if (!Array.isArray(item.content)) return null;
   const text = item.content
     .flatMap((part) =>
-      part && typeof part === "object" && (part as Record<string, unknown>).type === "text" &&
+      part &&
+      typeof part === "object" &&
+      (part as Record<string, unknown>).type === "text" &&
       typeof (part as Record<string, unknown>).text === "string"
         ? [String((part as Record<string, unknown>).text)]
         : [],
     )
     .join("\n\n")
     .trim();
-  const attachments: AgentAttachment[] = item.content.reduce<AgentAttachment[]>((result, part, index) => {
+  const attachments = item.content.reduce<AgentAttachment[]>((result, part, index) => {
     if (!part || typeof part !== "object") return result;
     const value = part as Record<string, unknown>;
     if (value.type === "localImage" && typeof value.path === "string") {
       result.push({ id: `${String(item.id)}-${index}`, name: "Image", path: value.path, kind: "image" });
-      return result;
-    }
-    if (value.type === "image" && typeof value.url === "string") {
+    } else if (value.type === "image" && typeof value.url === "string") {
       result.push({ id: `${String(item.id)}-${index}`, name: "Image", path: value.url, url: value.url, kind: "image" });
-      return result;
-    }
-    if (value.type === "mention" && typeof value.path === "string") {
+    } else if (value.type === "mention" && typeof value.path === "string") {
       result.push({
         id: `${String(item.id)}-${index}`,
         name: typeof value.name === "string" ? value.name : value.path,
         path: value.path,
         kind: "file",
       });
-      return result;
     }
     return result;
   }, []);
@@ -142,7 +122,8 @@ const diffForTurn = (items: Record<string, unknown>[]) => {
   const patches = items.flatMap((item) =>
     item.type === "fileChange" && Array.isArray(item.changes)
       ? item.changes.flatMap((change) =>
-          change && typeof change === "object" &&
+          change &&
+          typeof change === "object" &&
           typeof (change as Record<string, unknown>).diff === "string"
             ? [String((change as Record<string, unknown>).diff)]
             : [],
@@ -160,19 +141,12 @@ export type CodexThreadPage = {
 export const readCodexThreadChangeSummary = async (
   threadId: string,
 ): Promise<ThreadChangeSummary | null> => {
-  const response = await nativeBridge.agentRequest<{ data?: unknown }>("thread/turns/list", {
-    threadId,
-    // The newest turn is often only a question or status update. A small tail
-    // finds the latest actual edit without loading the complete conversation.
-    limit: 6,
-    sortDirection: "desc",
-    itemsView: "full",
-  });
+  const response = await nativeBridge.readCodexThreadTurns(threadId, null, 6);
   const turns = Array.isArray(response.data) ? response.data : [];
   for (const turn of turns) {
     if (!turn || typeof turn !== "object") continue;
     const items = Array.isArray((turn as Record<string, unknown>).items)
-      ? (turn as Record<string, unknown>).items as unknown[]
+      ? ((turn as Record<string, unknown>).items as unknown[])
       : [];
     const files = new Map<string, { additions: number; deletions: number }>();
     for (const item of items) {
@@ -197,11 +171,13 @@ export const readCodexThreadChangeSummary = async (
         });
       }
     }
-    if (files.size) return {
-      files: files.size,
-      additions: [...files.values()].reduce((sum, file) => sum + file.additions, 0),
-      deletions: [...files.values()].reduce((sum, file) => sum + file.deletions, 0),
-    };
+    if (files.size) {
+      return {
+        files: files.size,
+        additions: [...files.values()].reduce((sum, file) => sum + file.additions, 0),
+        deletions: [...files.values()].reduce((sum, file) => sum + file.deletions, 0),
+      };
+    }
   }
   return null;
 };
@@ -210,13 +186,7 @@ export const readCodexThreadTimeline = async (
   threadId: string,
   cursor: string | null = null,
 ): Promise<CodexThreadPage> => {
-  const response = await nativeBridge.agentRequest<{ data?: unknown; nextCursor?: unknown }>("thread/turns/list", {
-    threadId,
-    cursor,
-    limit: 24,
-    sortDirection: "desc",
-    itemsView: "full",
-  });
+  const response = await nativeBridge.readCodexThreadTurns(threadId, cursor);
   const turns = Array.isArray(response.data) ? [...response.data].reverse() : [];
   const timeline = turns.flatMap((rawTurn) => {
     if (!rawTurn || typeof rawTurn !== "object") return [];
@@ -224,7 +194,9 @@ export const readCodexThreadTimeline = async (
     const turnId = typeof turn.id === "string" ? turn.id : crypto.randomUUID();
     const createdAt = typeof turn.startedAt === "number" ? turn.startedAt * 1_000 : Date.now();
     const items = Array.isArray(turn.items)
-      ? turn.items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      ? turn.items.filter(
+          (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+        )
       : [];
     const turnDiff = diffForTurn(items);
     return items.flatMap((item) => {

@@ -96,6 +96,25 @@ export const nativeBridge = {
     return invoke<AgentThreadTokenUsage[]>("read_agent_thread_usage");
   },
 
+  listCodexThreadsPage(archived: boolean, cursor: string | null) {
+    return invoke<{ data?: unknown; nextCursor?: unknown }>("list_codex_threads_page", {
+      archived,
+      cursor,
+    });
+  },
+
+  readCodexThreadTurns(threadId: string, cursor: string | null, limit = 24) {
+    return invoke<{ data?: unknown; nextCursor?: unknown }>("read_codex_thread_turns", {
+      threadId,
+      cursor,
+      limit,
+    });
+  },
+
+  readCodexRateLimits() {
+    return invoke<Record<string, unknown>>("read_codex_rate_limits");
+  },
+
   listAgentModels(projectPath: string, taskId: string) {
     return invoke<AgentModelSummary[]>("list_agent_models", { projectPath, taskId });
   },

@@ -15,8 +15,10 @@
     </script>
     <style>
       html,body,#root{min-height:100%;margin:0;background:#f7f7f5}html[data-theme="dark"],html[data-theme="dark"] body,html[data-theme="dark"] #root{background:#171716}
-      #xiao-boot{position:fixed;inset:0;display:grid;place-items:center}
-      #xiao-boot img{width:28px;height:28px;opacity:.55}
+      #xiao-boot{position:fixed;inset:0;display:grid;place-items:center;color:#262623;font:600 14px/1.2 "Segoe UI Variable Text","Segoe UI",sans-serif;letter-spacing:-.01em}
+      #xiao-boot span{display:flex;align-items:center;gap:11px;padding:10px 14px;border:1px solid rgba(127,127,120,.14);border-radius:15px;background:rgba(255,255,255,.36);box-shadow:0 8px 30px rgba(20,20,18,.04)}
+      #xiao-boot img{width:30px;height:30px}
+      html[data-theme="dark"] #xiao-boot{color:#eeeeea}html[data-theme="dark"] #xiao-boot span{background:rgba(255,255,255,.035);box-shadow:0 8px 30px rgba(0,0,0,.12)}
     </style>
     <link rel="icon" href="/xiao-mark.png" type="image/png" />
     <meta
@@ -26,7 +28,7 @@
     <title>Xiao Workbench</title>
   </head>
   <body>
-    <div id="root"><div id="xiao-boot"><img src="/xiao-mark.png" alt="" /></div></div>
+    <div id="root"><div id="xiao-boot"><span><img src="/xiao-mark.png" alt="" /><strong>Xiao Workbench</strong></span></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

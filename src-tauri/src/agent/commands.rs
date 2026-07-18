@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
 use crate::execution::service::resolve_execution_context;
@@ -6,6 +6,8 @@ use crate::xiao::repository::XiaoRepository;
 
 use super::runtime::{EnvironmentRuntimeRegistry, StartResult};
 use super::{models, service};
+
+const DESKTOP_HISTORY_ENVIRONMENT_ID: &str = "codex-desktop-history";
 
 #[tauri::command]
 pub fn start_agent_runtime(
@@ -245,6 +247,91 @@ pub async fn read_agent_thread_usage() -> Result<Vec<models::AgentThreadTokenUsa
 }
 
 #[tauri::command]
+pub async fn list_codex_threads_page(
+    app: AppHandle,
+    archived: bool,
+    cursor: Option<String>,
+    runtimes: State<'_, EnvironmentRuntimeRegistry>,
+) -> Result<Value, String> {
+    validate_history_cursor(cursor.as_deref())?;
+    runtimes.start_desktop_history(app, DESKTOP_HISTORY_ENVIRONMENT_ID)?;
+    runtimes
+        .request(
+            DESKTOP_HISTORY_ENVIRONMENT_ID,
+            "thread/list".to_owned(),
+            json!({
+                "archived": archived,
+                "cursor": cursor,
+                "limit": 100,
+                "sortKey": "recency_at",
+                "sortDirection": "desc",
+                "sourceKinds": ["cli", "vscode", "appServer"]
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn read_codex_thread_turns(
+    app: AppHandle,
+    thread_id: String,
+    cursor: Option<String>,
+    limit: Option<u32>,
+    runtimes: State<'_, EnvironmentRuntimeRegistry>,
+) -> Result<Value, String> {
+    validate_history_identifier(&thread_id)?;
+    validate_history_cursor(cursor.as_deref())?;
+    runtimes.start_desktop_history(app, DESKTOP_HISTORY_ENVIRONMENT_ID)?;
+    runtimes
+        .request(
+            DESKTOP_HISTORY_ENVIRONMENT_ID,
+            "thread/turns/list".to_owned(),
+            json!({
+                "threadId": thread_id,
+                "cursor": cursor,
+                "limit": limit.unwrap_or(24).clamp(1, 50),
+                "sortDirection": "desc",
+                "itemsView": "full"
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn read_codex_rate_limits(
+    app: AppHandle,
+    runtimes: State<'_, EnvironmentRuntimeRegistry>,
+) -> Result<Value, String> {
+    runtimes.start_desktop_history(app, DESKTOP_HISTORY_ENVIRONMENT_ID)?;
+    runtimes
+        .request(
+            DESKTOP_HISTORY_ENVIRONMENT_ID,
+            "account/rateLimits/read".to_owned(),
+            Value::Null,
+        )
+        .await
+}
+
+fn validate_history_identifier(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err("The Codex thread identifier is invalid.".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_history_cursor(value: Option<&str>) -> Result<(), String> {
+    if value.is_some_and(|cursor| cursor.len() > 4_096 || cursor.chars().any(char::is_control)) {
+        return Err("The Codex history cursor is invalid.".to_owned());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn list_agent_models(
     project_path: String,
     task_id: String,
@@ -262,7 +349,8 @@ mod tests {
 
     use super::{
         apply_execution_root, contains_execution_path_fields, native_run_method,
-        strip_execution_path_fields, validate_direct_command,
+        strip_execution_path_fields, validate_direct_command, validate_history_cursor,
+        validate_history_identifier,
     };
 
     #[test]
@@ -358,5 +446,13 @@ mod tests {
         assert!(!contains_execution_path_fields(
             &json!({ "threadId": "thread" })
         ));
+    }
+
+    #[test]
+    fn desktop_history_inputs_are_bounded() {
+        assert!(validate_history_identifier("019f748a-9c6b-7942-984f-9fe8e2b428e8").is_ok());
+        assert!(validate_history_identifier("../escape").is_err());
+        assert!(validate_history_cursor(Some("cursor-value")).is_ok());
+        assert!(validate_history_cursor(Some("bad\ncursor")).is_err());
     }
 }

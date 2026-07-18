@@ -10,8 +10,9 @@ mod workspace;
 mod xiao;
 
 use agent::commands::{
-    agent_request, list_agent_models, read_agent_account, read_agent_thread_usage,
-    read_agent_usage, start_agent_runtime, stop_agent_runtime,
+    agent_request, list_agent_models, list_codex_threads_page, read_agent_account,
+    read_agent_thread_usage, read_agent_usage, read_codex_rate_limits, read_codex_thread_turns,
+    start_agent_runtime, stop_agent_runtime,
 };
 use agent::runtime::EnvironmentRuntimeRegistry;
 use browser::commands::{
@@ -115,6 +116,9 @@ pub fn run() {
             read_agent_account,
             read_agent_usage,
             read_agent_thread_usage,
+            list_codex_threads_page,
+            read_codex_thread_turns,
+            read_codex_rate_limits,
             list_agent_models,
             enqueue_xiao_run,
             list_xiao_runs,

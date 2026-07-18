@@ -107,6 +107,23 @@ impl AgentRuntime {
         app: AppHandle,
         environment_id: &str,
     ) -> Result<StartResult, String> {
+        self.start_with_storage(app, environment_id, true)
+    }
+
+    pub fn start_for_desktop_history(
+        &self,
+        app: AppHandle,
+        environment_id: &str,
+    ) -> Result<StartResult, String> {
+        self.start_with_storage(app, environment_id, false)
+    }
+
+    fn start_with_storage(
+        &self,
+        app: AppHandle,
+        environment_id: &str,
+        isolated_storage: bool,
+    ) -> Result<StartResult, String> {
         validate_environment_id(environment_id)?;
         let _lifecycle = self.lifecycle.lock().map_err(|error| error.to_string())?;
         let version = codex_version().ok_or_else(|| {
@@ -150,20 +167,21 @@ impl AgentRuntime {
         let mut command = codex_command().ok_or_else(|| {
             "Codex CLI was not found. Install it before connecting the agent runtime.".to_owned()
         })?;
-        let runtime_state_dir = app
-            .state::<XiaoRepository>()
-            .app_data_dir()
-            .join("codex-runtime")
-            .join(environment_id);
-        std::fs::create_dir_all(&runtime_state_dir).map_err(|error| error.to_string())?;
-        command
-            .args([
-                "app-server",
-                "--stdio",
-                "--enable",
-                "default_mode_request_user_input",
-            ])
-            .env("CODEX_SQLITE_HOME", runtime_state_dir);
+        command.args([
+            "app-server",
+            "--stdio",
+            "--enable",
+            "default_mode_request_user_input",
+        ]);
+        if isolated_storage {
+            let runtime_state_dir = app
+                .state::<XiaoRepository>()
+                .app_data_dir()
+                .join("codex-runtime")
+                .join(environment_id);
+            std::fs::create_dir_all(&runtime_state_dir).map_err(|error| error.to_string())?;
+            command.env("CODEX_SQLITE_HOME", runtime_state_dir);
+        }
         let mut command = super::supervisor::supervise_command(command)?;
         command
             .stdin(Stdio::piped())
@@ -568,6 +586,15 @@ impl EnvironmentRuntimeRegistry {
     pub fn start(&self, app: AppHandle, environment_id: &str) -> Result<StartResult, String> {
         self.runtime(environment_id)?
             .start_for_environment(app, environment_id)
+    }
+
+    pub fn start_desktop_history(
+        &self,
+        app: AppHandle,
+        environment_id: &str,
+    ) -> Result<StartResult, String> {
+        self.runtime(environment_id)?
+            .start_for_desktop_history(app, environment_id)
     }
 
     pub fn stop(&self, environment_id: &str) -> Result<(), String> {
