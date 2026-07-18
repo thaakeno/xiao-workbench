@@ -601,16 +601,14 @@ const taskFromCodexThread = (thread: CodexThreadSummary): WorkbenchTask => ({
   workspaceMode: "local",
   managedWorktreeId: null,
   origin: "codex",
+  sourceCwd: thread.cwd,
   historyLoaded: false,
   historyCursor: null,
   historyLoadingOlder: false,
 });
 
 const mergeCodexTasks = (current: WorkbenchTask[], threads: CodexThreadSummary[]) => {
-  const threadIds = new Set(threads.map((thread) => thread.id));
-  const next = current.filter(
-    (task) => task.origin !== "codex" || Boolean(task.threadId && threadIds.has(task.threadId)),
-  );
+  const next = [...current];
   for (const thread of threads) {
     const index = next.findIndex((task) => task.threadId === thread.id);
     if (index < 0) next.push(taskFromCodexThread(thread));
@@ -620,6 +618,7 @@ const mergeCodexTasks = (current: WorkbenchTask[], threads: CodexThreadSummary[]
         ...existing,
         title: thread.title,
         archived: thread.archived,
+        sourceCwd: thread.cwd,
         updatedAt: Math.max(existing.updatedAt, thread.updatedAt),
         meta: taskMeta(Math.max(existing.updatedAt, thread.updatedAt)),
       };
@@ -644,6 +643,7 @@ const upsertCodexTask = (current: WorkbenchTask[], thread: CodexThreadSummary) =
     ...existing,
     title: thread.title,
     archived: thread.archived,
+    sourceCwd: thread.cwd,
     updatedAt,
     meta: taskMeta(updatedAt),
   };
@@ -2397,39 +2397,20 @@ export function App() {
             }}
             onSelectCodexThread={(thread) => {
               const taskId = `codex:${thread.id}`;
-              if (sameWorkspacePath(thread.cwd, taskWorkspacePath)) {
-                setTasks((current) => upsertCodexTask(current, thread));
-                setActiveTaskId(taskId);
-                setOpenTaskIds((current) => current.includes(taskId) ? current : [...current, taskId]);
-                setDraftTabOpen(false);
-                setActivePage("tasks");
-                setFocusPanelOpen(false);
-                closeSidebarOnNarrow();
-                return;
-              }
-              const cached = readStartupTaskState(thread.cwd);
-              let nextTasks = mergeCodexTasks(cached?.tasks ?? [], [thread]);
               const prefetched = peekCodexThreadTimeline(thread.id);
-              if (prefetched) {
-                nextTasks = nextTasks.map((task) => task.id === taskId ? {
+              setTasks((current) => upsertCodexTask(current, thread).map((task) =>
+                task.id === taskId && prefetched ? {
                   ...task,
                   timeline: prefetched.timeline,
                   timelineLoaded: true,
                   timelineComplete: prefetched.nextCursor === null,
                   timelineEntryCount: prefetched.timeline.length,
                   historyCursor: prefetched.nextCursor,
-                } : task);
-              }
-              pendingCodexThreadRef.current = thread.id;
-              openProjectWithoutTaskRef.current = false;
-              nativeWorkspaceLoadedRef.current.delete(thread.cwd);
-              setTasks(nextTasks);
+                } : task,
+              ));
               setActiveTaskId(taskId);
-              setOpenTaskIds([taskId]);
+              setOpenTaskIds((current) => current.includes(taskId) ? current : [...current, taskId]);
               setDraftTabOpen(false);
-              setTaskWorkspacePath(thread.cwd);
-              setTaskStateReady(true);
-              setActiveProjectPath(thread.cwd);
               setActivePage("tasks");
               setFocusPanelOpen(false);
               closeSidebarOnNarrow();

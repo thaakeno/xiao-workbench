@@ -189,9 +189,12 @@ export function Sidebar({
   const taskMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuTriggerRef = useRef<HTMLElement | null>(null);
   const visibleTasks = useMemo(() => [...tasks]
-    .filter((task) => !task.archived)
+    .filter((task) =>
+      !task.archived &&
+      (task.origin !== "codex" || !task.sourceCwd || sameProjectPath(task.sourceCwd, activeProjectPath)),
+    )
     .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt),
-  [tasks]);
+  [activeProjectPath, tasks]);
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, WorkbenchTask[]>();
     for (const task of visibleTasks) {

@@ -38,6 +38,7 @@ export type WorkbenchTask = {
   timelineEntryCount: number;
   plan: AgentPlan | null;
   origin?: "xiao" | "codex";
+  sourceCwd?: string;
   historyLoaded?: boolean;
   historyCursor?: string | null;
   historyLoadingOlder?: boolean;
