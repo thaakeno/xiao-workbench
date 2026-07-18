@@ -17,6 +17,7 @@ type ActivityItemProps = {
     decision: "accept" | "decline",
   ) => Promise<void>;
   onReviewChanges: () => void;
+  workspacePath?: string;
   canUndo?: boolean;
   undoing?: boolean;
   onUndo?: () => void;
@@ -100,10 +101,12 @@ export function ActivityItem({
   onForkTask,
   onResolveApproval,
   onReviewChanges,
+  workspacePath = "",
   canUndo = false,
   undoing = false,
   onUndo = () => undefined,
 }: ActivityItemProps) {
+  const [allFilesVisible, setAllFilesVisible] = useState(false);
   const waitingForApproval = entry.kind === "approval" && entry.status === "warning";
   const userMessage = entry.kind === "brief" || entry.kind === "user";
   const assistantMessage = entry.kind === "result" && entry.title === "Agent response";
@@ -334,12 +337,18 @@ export function ActivityItem({
           </span>
         </div>
         <div className="patch-activity__files">
-          {entry.files.map((file) => {
-            const directory = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
-            const filename = file.path.slice(file.path.lastIndexOf("/") + 1);
+          {entry.files.slice(0, allFilesVisible ? undefined : 3).map((file) => {
+            const normalizedRoot = workspacePath.replaceAll("\\", "/").replace(/\/$/, "");
+            const normalizedFile = file.path.replace(/^\\\\\?\\/, "").replaceAll("\\", "/");
+            const relativePath = normalizedFile.toLocaleLowerCase().startsWith(`${normalizedRoot.toLocaleLowerCase()}/`)
+              ? normalizedFile.slice(normalizedRoot.length + 1)
+              : normalizedFile.replace(/^[a-z]:\//i, "");
+            const separator = relativePath.lastIndexOf("/");
+            const directory = separator >= 0 ? relativePath.slice(0, separator) : "";
+            const filename = relativePath.slice(separator + 1);
             const lines = file.patch ? patchLines(file.patch) : [];
             return (
-              <details key={file.path} open={entry.status === "active" || expandToolOutput}>
+              <details key={file.path} open={expandToolOutput}>
                 <summary>
                   <span className="patch-activity__file-icon"><XiaoIcon name="mutation" size={14} /></span>
                   <span className="patch-activity__path">
@@ -370,6 +379,17 @@ export function ActivityItem({
               </details>
             );
           })}
+          {entry.files.length > 3 ? (
+            <button
+              className="patch-activity__expand"
+              type="button"
+              aria-expanded={allFilesVisible}
+              onClick={() => setAllFilesVisible((visible) => !visible)}
+            >
+              <XiaoIcon name="caret" size={13} />
+              {allFilesVisible ? "Show fewer files" : `Show ${entry.files.length - 3} more files`}
+            </button>
+          ) : null}
         </div>
       </article>
     );
@@ -436,3 +456,4 @@ export function ActivityItem({
     </article>
   );
 }
+import { useState } from "react";

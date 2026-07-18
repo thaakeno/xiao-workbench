@@ -28,6 +28,7 @@ type TaskTimelineProps = {
   onUndo: () => void;
   historyLoadingOlder: boolean;
   onLoadOlderHistory: () => Promise<void>;
+  workspacePath: string;
 };
 
 type TimelineRow =
@@ -135,6 +136,7 @@ export function TaskTimeline({
   onUndo,
   historyLoadingOlder,
   onLoadOlderHistory,
+  workspacePath,
 }: TaskTimelineProps) {
   const taskWorking = runtime.phase === "working" && runtime.taskId === taskId;
   let latestUserIndex = -1;
@@ -174,6 +176,7 @@ export function TaskTimeline({
             entries={row.entries}
             expandByDefault={expandToolOutput}
             index={row.index}
+            startedAt={taskWorking ? runtime.turnStartedAt : null}
             key={`exploration-${row.entries.map((entry) => entry.id).join("-")}`}
           />
         ) : (
@@ -186,6 +189,7 @@ export function TaskTimeline({
               taskId={taskId}
               onResolveApproval={onResolveApproval}
               onReviewChanges={onReviewChanges}
+              workspacePath={workspacePath}
               canFork={canFork}
               onForkTask={onForkTask}
               canUndo={canUndo && row.entry.id === latestChangeId}

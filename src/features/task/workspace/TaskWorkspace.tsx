@@ -403,6 +403,7 @@ export function TaskWorkspace({
       >
       <TaskTimeline
           taskId={taskId}
+          workspacePath={workspace.path}
           timeline={timeline}
           runtime={runtime}
           showReasoningSummaries={showReasoningSummaries}

@@ -893,6 +893,19 @@
   white-space: nowrap;
 }
 
+.exploration-group__item a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: var(--text-micro);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exploration-group__item a:hover { text-decoration: underline; }
+.exploration-group__item.is-web > span { color: var(--accent); }
+
 .exploration-group__item small {
   min-width: 0;
   overflow: hidden;
@@ -1001,6 +1014,26 @@
 .patch-activity__files details + details {
   border-top: 1px solid var(--line);
 }
+
+.patch-activity__expand {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface-deep);
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: var(--text-micro);
+  cursor: pointer;
+}
+
+.patch-activity__expand svg { transition: transform 150ms ease; }
+.patch-activity__expand[aria-expanded="true"] svg { transform: rotate(180deg); }
+.patch-activity__expand:hover { background: var(--surface-hover); color: var(--text); }
 
 .patch-activity__files summary {
   display: grid;

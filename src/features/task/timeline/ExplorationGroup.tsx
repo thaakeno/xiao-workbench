@@ -5,6 +5,7 @@ type ExplorationGroupProps = {
   entries: TimelineEntry[];
   index: number;
   expandByDefault: boolean;
+  startedAt: number | null;
 };
 
 const iconByAction: Record<AgentExplorationAction["kind"], XiaoIconName> = {
@@ -26,7 +27,13 @@ const actionLabel = (action: AgentExplorationAction) => {
   return "Listed";
 };
 
-export function ExplorationGroup({ entries, index, expandByDefault }: ExplorationGroupProps) {
+const elapsedLabel = (elapsedMs: number) => {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+};
+
+export function ExplorationGroup({ entries, index, expandByDefault, startedAt }: ExplorationGroupProps) {
+  const [now, setNow] = useState(Date.now);
   const actions = entries.flatMap((entry) => {
     const projected = entry.exploration?.length
       ? entry.exploration
@@ -53,6 +60,15 @@ export function ExplorationGroup({ entries, index, expandByDefault }: Exploratio
     commands ? countLabel(commands, "command") : null,
     web ? countLabel(web, "web search") : null,
   ].filter((value): value is string => Boolean(value));
+  const firstEventAt = entries.find((entry) => entry.createdAt)?.createdAt ?? null;
+  const lastEventAt = [...entries].reverse().find((entry) => entry.createdAt)?.createdAt ?? null;
+  const elapsed = elapsedLabel(Math.max(0, (active ? now : lastEventAt ?? now) - (startedAt ?? firstEventAt ?? now)));
+
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
 
   return (
     <article
@@ -64,7 +80,7 @@ export function ExplorationGroup({ entries, index, expandByDefault }: Exploratio
           <span className="exploration-group__mark">
             <XiaoIcon name="search" size={13} />
           </span>
-          <strong>{active ? "Working" : "Worked"}</strong>
+          <strong>{active ? "Working for" : "Worked for"} {elapsed}</strong>
           <span>{counts.join(", ") || countLabel(entries.length, "action")}</span>
           {active ? <i className="activity__pulse" /> : null}
           <XiaoIcon className="exploration-group__caret" name="caret" size={12} />
@@ -72,14 +88,18 @@ export function ExplorationGroup({ entries, index, expandByDefault }: Exploratio
         <div className="exploration-group__items">
           {actions.map(({ action, entryId, status }, actionIndex) => (
             <div
-              className={`exploration-group__item is-${status ?? "idle"}`}
+              className={`exploration-group__item is-${status ?? "idle"} is-${action.kind}`}
               key={`${entryId}-${actionIndex}-${action.command}`}
               title={action.command}
             >
               <span><XiaoIcon name={iconByAction[action.kind]} size={13} /></span>
               <div>
                 <strong>{actionLabel(action)}</strong>
-                <code>{action.kind === "search" ? action.query || action.label : action.label}</code>
+                {action.kind === "web" && /^https?:\/\//i.test(action.label) ? (
+                  <a href={action.label} target="_blank" rel="noreferrer">{action.label}</a>
+                ) : (
+                  <code>{action.kind === "search" ? action.query || action.label : action.label}</code>
+                )}
                 {action.path && action.path !== action.label ? <small>{action.path}</small> : null}
               </div>
               {status === "active" ? <i className="activity__pulse" /> : null}
@@ -90,3 +110,4 @@ export function ExplorationGroup({ entries, index, expandByDefault }: Exploratio
     </article>
   );
 }
+import { useEffect, useState } from "react";
