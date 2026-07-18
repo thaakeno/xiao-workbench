@@ -1,6 +1,6 @@
 [package]
 name = "xiao-workbench"
-version = "0.0.0-day07162026"
+version = "0.1.0"
 description = "A focused desktop workbench for coding agents"
 authors = ["Xiao"]
 license = "MIT"
