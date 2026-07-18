@@ -47,7 +47,9 @@ type SidebarProps = {
   onSelectProject: (path: string) => void;
   onCreateTask: (title: string) => void;
   onSelectTask: (taskId: string) => void;
+  onPrefetchTask: (taskId: string) => void;
   onSelectCodexThread: (thread: CodexThreadSummary) => void;
+  onPrefetchCodexThread: (threadId: string) => void;
   onToggleTaskPinned: (taskId: string) => void;
   onSetTaskArchived: (taskId: string, archived: boolean) => void;
   onRenameTask: (taskId: string, title: string) => void;
@@ -159,7 +161,9 @@ export function Sidebar({
   onSelectProject,
   onCreateTask,
   onSelectTask,
+  onPrefetchTask,
   onSelectCodexThread,
+  onPrefetchCodexThread,
   onToggleTaskPinned,
   onSetTaskArchived,
   onRenameTask,
@@ -702,6 +706,8 @@ export function Sidebar({
                                           className={`task-list__item ${selected ? "is-selected" : ""}`}
                                           aria-label={`${task.title}${stateLabel}${task.pinned ? ", pinned" : ""}`}
                                           title={task.title}
+                                          onFocus={() => onPrefetchTask(task.id)}
+                                          onPointerEnter={() => onPrefetchTask(task.id)}
                                           onClick={() => {
                                             onMarkTaskUnread(task.id, false);
                                             onSelectTask(task.id);
@@ -770,6 +776,8 @@ export function Sidebar({
                       type="button"
                       title={`${thread.title}\n${thread.cwd}`}
                       disabled={projectSwitchLocked && !selected}
+                      onFocus={() => onPrefetchCodexThread(thread.id)}
+                      onPointerEnter={() => onPrefetchCodexThread(thread.id)}
                       onClick={() => onSelectCodexThread(thread)}
                     >
                       <span>{thread.title}</span>

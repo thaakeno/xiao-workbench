@@ -24,6 +24,8 @@ import type {
 import { serviceTierForFastMode } from "../features/agent/hooks/agentProtocol";
 import {
   listCodexThreads,
+  peekCodexThreadTimeline,
+  prefetchCodexThreadTimeline,
   readCodexThreadChangeSummary,
   readCodexThreadTimeline,
   sameWorkspacePath,
@@ -625,6 +627,26 @@ const mergeCodexTasks = (current: WorkbenchTask[], threads: CodexThreadSummary[]
   );
 };
 
+const upsertCodexTask = (current: WorkbenchTask[], thread: CodexThreadSummary) => {
+  const index = current.findIndex((task) => task.threadId === thread.id);
+  if (index < 0) {
+    return [...current, taskFromCodexThread(thread)].sort(
+      (left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt,
+    );
+  }
+  const existing = current[index];
+  const updatedAt = Math.max(existing.updatedAt, thread.updatedAt);
+  const next = [...current];
+  next[index] = {
+    ...existing,
+    title: thread.title,
+    archived: thread.archived,
+    updatedAt,
+    meta: taskMeta(updatedAt),
+  };
+  return next;
+};
+
 export function App() {
   const { profile, saveProfile } = useLocalProfile();
   const [activeProjectPath, setActiveProjectPath] = useState<string | undefined>(readActiveProjectPath);
@@ -687,6 +709,7 @@ export function App() {
     readSnapshot(usageSnapshotStorageKey, []),
   );
   const [rateLimits, setRateLimits] = useState<AgentRateLimits | null>(null);
+  const prefetchedCodexThreadsRef = useRef(new Set<string>());
   const [threadChangeSummaries, setThreadChangeSummaries] = useState<
     Record<string, ThreadChangeSummary | null>
   >(() => readSnapshot(changeSummarySnapshotStorageKey, {}));
@@ -1327,6 +1350,44 @@ export function App() {
     !codexUpdate.updating && Boolean(executionTaskId),
   );
 
+  const prefetchTaskHistory = useCallback((taskId: string) => {
+    const task = tasks.find((item) => item.id === taskId);
+    if (
+      task?.origin !== "codex" ||
+      !task.threadId ||
+      task.timelineLoaded ||
+      prefetchedCodexThreadsRef.current.has(task.threadId)
+    ) return;
+    prefetchedCodexThreadsRef.current.add(task.threadId);
+    void prefetchCodexThreadTimeline(task.threadId).catch(() => {
+      prefetchedCodexThreadsRef.current.delete(task.threadId!);
+    });
+  }, [tasks]);
+
+  useEffect(() => {
+    if (!preferences.importCodexHistory || !taskStateReady) return;
+    const threadIds = tasks.flatMap((task) =>
+      task.origin === "codex" && task.threadId && !task.timelineLoaded ? [task.threadId] : [],
+    );
+    if (!threadIds.length) return;
+    let cancelled = false;
+    const warm = () => {
+      void (async () => {
+        for (const threadId of threadIds) {
+          if (cancelled || prefetchedCodexThreadsRef.current.has(threadId)) continue;
+          prefetchedCodexThreadsRef.current.add(threadId);
+          try { await prefetchCodexThreadTimeline(threadId); }
+          catch { prefetchedCodexThreadsRef.current.delete(threadId); }
+        }
+      })();
+    };
+    const idle = window.requestIdleCallback(warm, { timeout: 1_200 });
+    return () => {
+      cancelled = true;
+      window.cancelIdleCallback(idle);
+    };
+  }, [preferences.importCodexHistory, taskStateReady, taskWorkspacePath, tasks]);
+
   useEffect(() => {
     if (
       !preferences.importCodexHistory ||
@@ -1369,53 +1430,6 @@ export function App() {
     return () => { cancelled = true; };
   }, [agent.runtime.phase, codexThreads, preferences.importCodexHistory, threadChangeSummaries, workspace.path]);
 
-  useEffect(() => {
-    if (
-      activeTask.origin !== "codex" ||
-      activeTask.historyLoaded ||
-      !activeTask.threadId ||
-      loadingCodexThreadsRef.current.has(activeTask.threadId)
-    ) {
-      return;
-    }
-    const threadId = activeTask.threadId;
-    const taskId = activeTask.id;
-    loadingCodexThreadsRef.current.add(threadId);
-    void readCodexThreadTimeline(threadId)
-      .then((page) => {
-        setTasks((current) => current.map((task) =>
-          task.id === taskId
-            ? {
-                ...task,
-                timeline: page.timeline,
-                historyLoaded: true,
-                historyCursor: page.nextCursor,
-              }
-            : task,
-        ));
-      })
-      .catch((reason) => {
-        const message = reason instanceof Error ? reason.message : String(reason);
-        setTasks((current) => current.map((task) =>
-          task.id === taskId
-            ? {
-                ...task,
-                historyLoaded: true,
-                timeline: [{
-                  id: `history-error-${threadId}`,
-                  kind: "result",
-                  title: "Could not load Codex history",
-                  body: message,
-                  status: "error",
-                  meta: "Codex",
-                }],
-              }
-            : task,
-        ));
-      })
-      .finally(() => loadingCodexThreadsRef.current.delete(threadId));
-  }, [activeTask.historyLoaded, activeTask.id, activeTask.origin, activeTask.threadId]);
-
   const loadOlderCodexHistory = useCallback(async () => {
     if (
       activeTask.origin !== "codex" ||
@@ -1436,6 +1450,8 @@ export function App() {
         return {
           ...task,
           timeline: [...page.timeline.filter((entry) => !existing.has(entry.id)), ...task.timeline],
+          timelineComplete: page.nextCursor === null,
+          timelineEntryCount: task.timelineEntryCount + page.timeline.length,
           historyCursor: page.nextCursor,
           historyLoadingOlder: false,
         };
@@ -2416,14 +2432,53 @@ export function App() {
             }}
             onCreateTask={createTask}
             onSelectTask={(taskId) => {
+              const task = tasks.find((item) => item.id === taskId);
+              if (task?.origin === "codex" && task.threadId && !task.timelineLoaded) {
+                const page = peekCodexThreadTimeline(task.threadId);
+                if (page) {
+                  setTasks((current) => current.map((item) => item.id === taskId ? {
+                    ...item,
+                    timeline: page.timeline,
+                    timelineLoaded: true,
+                    timelineComplete: page.nextCursor === null,
+                    timelineEntryCount: page.timeline.length,
+                    historyCursor: page.nextCursor,
+                  } : item));
+                }
+              }
               setActiveTaskId(taskId);
               setActivePage("tasks");
               closeSidebarOnNarrow();
             }}
+            onPrefetchTask={prefetchTaskHistory}
+            onPrefetchCodexThread={(threadId) => {
+              void prefetchCodexThreadTimeline(threadId).catch(() => undefined);
+            }}
             onSelectCodexThread={(thread) => {
               const taskId = `codex:${thread.id}`;
+              if (sameWorkspacePath(thread.cwd, taskWorkspacePath)) {
+                setTasks((current) => upsertCodexTask(current, thread));
+                setActiveTaskId(taskId);
+                setOpenTaskIds((current) => current.includes(taskId) ? current : [...current, taskId]);
+                setDraftTabOpen(false);
+                setActivePage("tasks");
+                setFocusPanelOpen(false);
+                closeSidebarOnNarrow();
+                return;
+              }
               const cached = readStartupTaskState(thread.cwd);
-              const nextTasks = mergeCodexTasks(cached?.tasks ?? [], [thread]);
+              let nextTasks = mergeCodexTasks(cached?.tasks ?? [], [thread]);
+              const prefetched = peekCodexThreadTimeline(thread.id);
+              if (prefetched) {
+                nextTasks = nextTasks.map((task) => task.id === taskId ? {
+                  ...task,
+                  timeline: prefetched.timeline,
+                  timelineLoaded: true,
+                  timelineComplete: prefetched.nextCursor === null,
+                  timelineEntryCount: prefetched.timeline.length,
+                  historyCursor: prefetched.nextCursor,
+                } : task);
+              }
               pendingCodexThreadRef.current = thread.id;
               openProjectWithoutTaskRef.current = false;
               nativeWorkspaceLoadedRef.current.delete(thread.cwd);

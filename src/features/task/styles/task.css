@@ -292,12 +292,6 @@
   overscroll-behavior-x: none;
   overscroll-behavior-y: contain;
   overflow-anchor: none;
-  animation: task-switch-in 130ms cubic-bezier(0.22, 0.8, 0.2, 1) both;
-}
-
-@keyframes task-switch-in {
-  from { opacity: 0.72; transform: translateY(3px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 .timeline {
@@ -306,22 +300,23 @@
   min-height: 100%;
   margin: 0 auto;
   padding: 34px 34px 44px;
-  animation: timeline-switch-in 190ms cubic-bezier(0.22, 0.8, 0.2, 1) both;
 }
 
 .timeline-anchor { scroll-margin-block: 88px 150px; }
 
-@keyframes timeline-switch-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+.timeline__history-loading {
+  width: min(72%, 480px);
+  height: 9px;
+  margin: 34px auto 52px;
+  border-radius: 99px;
+  background: var(--surface-strong);
+  box-shadow: 0 18px 0 var(--surface-strong), 0 36px 0 var(--surface-strong);
+  font-size: 0;
+  opacity: 0.62;
+  animation: timeline-placeholder 900ms ease-in-out infinite alternate;
 }
 
-.timeline__history-loading {
-  padding: 2px 0 20px;
-  color: var(--muted);
-  font-size: 11px;
-  text-align: center;
-}
+@keyframes timeline-placeholder { to { opacity: 0.34; } }
 
 .timeline__load-earlier {
   display: grid;
@@ -378,21 +373,11 @@
 }
 
 .activity {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 92px;
-  opacity: 0;
-  animation: activity-enter 280ms cubic-bezier(0.22, 0.8, 0.2, 1) forwards;
-  animation-delay: 0ms;
-}
-
-@keyframes activity-enter {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+  min-width: 0;
 }
 
 .timeline-anchor {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 96px;
+  min-width: 0;
 }
 
 .chat-export { position: relative; }

@@ -240,10 +240,10 @@ export function TaskWorkspace({
     const previousTop = node.scrollTop;
     try {
       await onLoadOlderHistory();
-      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         if (scrollArea.current !== node) return;
         node.scrollTop = previousTop + Math.max(0, node.scrollHeight - previousHeight);
-      }));
+      });
     } finally {
       loadingOlder.current = false;
     }
@@ -386,7 +386,6 @@ export function TaskWorkspace({
         onUndo={onUndo}
       />
       <div
-        key={taskId}
         className="task-workspace__scroll"
         ref={scrollArea}
         onScroll={(event) => {
@@ -396,7 +395,6 @@ export function TaskWorkspace({
         }}
       >
       <TaskTimeline
-          key={taskId}
           taskId={taskId}
           timeline={timeline}
           runtime={runtime}

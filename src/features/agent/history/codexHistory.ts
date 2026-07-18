@@ -138,6 +138,9 @@ export type CodexThreadPage = {
   nextCursor: string | null;
 };
 
+const firstPageCache = new Map<string, CodexThreadPage>();
+const firstPageRequests = new Map<string, Promise<CodexThreadPage>>();
+
 export const readCodexThreadChangeSummary = async (
   threadId: string,
 ): Promise<ThreadChangeSummary | null> => {
@@ -182,7 +185,7 @@ export const readCodexThreadChangeSummary = async (
   return null;
 };
 
-export const readCodexThreadTimeline = async (
+const fetchCodexThreadTimeline = async (
   threadId: string,
   cursor: string | null = null,
 ): Promise<CodexThreadPage> => {
@@ -213,6 +216,34 @@ export const readCodexThreadTimeline = async (
     nextCursor: typeof response.nextCursor === "string" ? response.nextCursor : null,
   };
 };
+
+export const peekCodexThreadTimeline = (threadId: string) => firstPageCache.get(threadId) ?? null;
+
+export const prefetchCodexThreadTimeline = (threadId: string): Promise<CodexThreadPage> => {
+  const cached = firstPageCache.get(threadId);
+  if (cached) return Promise.resolve(cached);
+  const pending = firstPageRequests.get(threadId);
+  if (pending) return pending;
+  const request = fetchCodexThreadTimeline(threadId)
+    .then((page) => {
+      firstPageCache.set(threadId, page);
+      firstPageRequests.delete(threadId);
+      return page;
+    })
+    .catch((reason) => {
+      firstPageRequests.delete(threadId);
+      throw reason;
+    });
+  firstPageRequests.set(threadId, request);
+  return request;
+};
+
+export const readCodexThreadTimeline = (
+  threadId: string,
+  cursor: string | null = null,
+): Promise<CodexThreadPage> => cursor
+  ? fetchCodexThreadTimeline(threadId, cursor)
+  : prefetchCodexThreadTimeline(threadId);
 
 export const sameWorkspacePath = (left: string, right: string) =>
   left.replace(/[\\/]+$/, "").toLocaleLowerCase() ===

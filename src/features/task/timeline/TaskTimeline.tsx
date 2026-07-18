@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import type { AgentRuntimeState, TimelineEntry } from "../../../core/models/agent";
@@ -118,9 +118,6 @@ export const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
   return rows;
 };
 
-export const visibleTimelineRows = (rows: TimelineRow[], count: number) =>
-  rows.length > count ? rows.slice(rows.length - count) : rows;
-
 export function TaskTimeline({
   timeline,
   runtime,
@@ -153,27 +150,15 @@ export function TaskTimeline({
   );
   const rows = useMemo(() => timelineRows(displayTimeline), [displayTimeline]);
   const latestChangeId = [...displayTimeline].reverse().find((entry) => entry.kind === "change")?.id;
-  const [visibleRowCount, setVisibleRowCount] = useState(240);
-  useEffect(() => setVisibleRowCount(240), [taskId]);
-  const hiddenRows = Math.max(0, rows.length - visibleRowCount);
-  const visibleRows = visibleTimelineRows(rows, visibleRowCount);
-  const revealEarlier = async () => {
-    if (hiddenRows) {
-      setVisibleRowCount((count) => count + 240);
-      return;
-    }
-    await onLoadOlderHistory();
-    setVisibleRowCount((count) => count + 240);
-  };
   return (
     <div className="timeline" aria-live="polite">
       {historyLoading ? (
         <div className="timeline__history-loading">Loading earlier task activity…</div>
       ) : null}
-      {!historyLoading && (hiddenRows > 0 || historyHasMore) ? (
-        <button className="timeline__load-earlier" type="button" disabled={historyLoadingOlder} onClick={() => void revealEarlier()}>
+      {!historyLoading && historyHasMore ? (
+        <button className="timeline__load-earlier" type="button" disabled={historyLoadingOlder} onClick={() => void onLoadOlderHistory()}>
           {historyLoadingOlder ? "Loading earlier activity" : "Show earlier activity"}
-          <small>{hiddenRows > 0 ? `${Math.min(hiddenRows, 240)} cached items` : "Load from local history"}</small>
+          <small>Load from local history</small>
         </button>
       ) : null}
       {!displayTimeline.length && !historyLoading ? (
@@ -183,7 +168,7 @@ export function TaskTimeline({
           <p>Describe the outcome below. Xiao will keep the work, commands, and changes in this task.</p>
         </div>
       ) : null}
-      {visibleRows.map((row) =>
+      {rows.map((row) =>
         row.kind === "exploration" ? (
           <ExplorationGroup
             entries={row.entries}
