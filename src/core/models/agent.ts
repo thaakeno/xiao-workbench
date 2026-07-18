@@ -163,13 +163,7 @@ export const contextUsedPercent = (
   const contextWindow = normalized.modelContextWindow ?? fallbackContextWindow;
   if (!contextWindow || contextWindow <= 0) return null;
 
-  const baselineTokens = 12_000;
-  if (contextWindow <= baselineTokens) return 100;
-  const effectiveWindow = contextWindow - baselineTokens;
-  const used = Math.max(0, normalized.last.totalTokens - baselineTokens);
-  const remaining = Math.max(0, effectiveWindow - used);
-  const remainingPercent = Math.round((remaining / effectiveWindow) * 100);
-  return Math.min(100, Math.max(0, 100 - remainingPercent));
+  return Math.min(100, Math.max(0, Math.round((normalized.last.totalTokens / contextWindow) * 100)));
 };
 
 export type CodexUsageDay = TokenUsageBreakdown & {
@@ -207,10 +201,26 @@ export type AgentRateLimitWindow = {
   resetsAt: number | null;
 };
 
+export type AgentRateLimitResetCredit = {
+  id: string;
+  status: string;
+  resetType: string | null;
+  grantedAt: number | null;
+  expiresAt: number | null;
+  title: string | null;
+  description: string | null;
+};
+
 export type AgentRateLimits = {
   primary: AgentRateLimitWindow | null;
   secondary: AgentRateLimitWindow | null;
   creditsRemaining: number | null;
+  rateLimitReachedType: string | null;
+  resetCredits: {
+    availableCount: number;
+    credits: AgentRateLimitResetCredit[] | null;
+  } | null;
+  spendControlReached: boolean | null;
   updatedAt: number;
 };
 

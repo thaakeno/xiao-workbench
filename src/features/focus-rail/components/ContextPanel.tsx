@@ -75,14 +75,15 @@ export function ContextPanel({
 
   useEffect(() => setVisibleCount(pageSize), [filter, taskTitle]);
 
-  const totalUsage = normalizedUsage?.total ?? null;
-  const total = totalUsage?.totalTokens ?? 0;
-  const cached = Math.min(total, totalUsage?.cachedInputTokens ?? 0);
-  const input = Math.min(Math.max(0, total - cached), Math.max(0, (totalUsage?.inputTokens ?? 0) - cached));
-  const reasoning = Math.min(Math.max(0, total - cached - input), totalUsage?.reasoningOutputTokens ?? 0);
+  const sessionUsage = normalizedUsage?.total ?? null;
+  const activeUsage = normalizedUsage?.last ?? null;
+  const total = activeUsage?.totalTokens ?? 0;
+  const cached = Math.min(total, activeUsage?.cachedInputTokens ?? 0);
+  const input = Math.min(Math.max(0, total - cached), Math.max(0, (activeUsage?.inputTokens ?? 0) - cached));
+  const reasoning = Math.min(Math.max(0, total - cached - input), activeUsage?.reasoningOutputTokens ?? 0);
   const output = Math.min(
     Math.max(0, total - cached - input - reasoning),
-    Math.max(0, (totalUsage?.outputTokens ?? 0) - reasoning),
+    Math.max(0, (activeUsage?.outputTokens ?? 0) - reasoning),
   );
   const other = Math.max(0, total - cached - input - reasoning - output);
   const segments = [
@@ -115,7 +116,7 @@ export function ContextPanel({
       <div className="context-facts">
         <div><span>Messages</span><strong>{number.format(timeline.length)}</strong></div>
         <div><span>Model</span><strong>{model?.displayName ?? selectedModel ?? "Default"}</strong></div>
-        <div><span>Session tokens</span><strong>{totalUsage ? number.format(totalUsage.totalTokens) : "Not reported"}</strong></div>
+        <div><span>Session tokens</span><strong>{sessionUsage ? number.format(sessionUsage.totalTokens) : "Not reported"}</strong></div>
         <div><span>Context limit</span><strong>{contextLimit ? number.format(contextLimit) : "Not reported"}</strong></div>
         <div><span>Thread</span><strong>{threadId ? threadId.slice(0, 12) : "Not started"}</strong></div>
         <div><span>Last activity</span><strong>{time.format(lastActivity)}</strong></div>
@@ -124,9 +125,9 @@ export function ContextPanel({
       <section className="context-breakdown" aria-labelledby="context-breakdown-title">
         <header>
           <div><span>Composition</span><h3 id="context-breakdown-title">Token flow</h3></div>
-          <strong>{totalUsage ? number.format(total) : "--"}</strong>
+          <strong>{activeUsage ? number.format(total) : "--"}</strong>
         </header>
-        {totalUsage ? (
+        {activeUsage ? (
           <>
             <div className="context-breakdown__bar" aria-hidden="true">
               {segments.filter((segment) => segment.value > 0).map((segment) => (
@@ -146,7 +147,7 @@ export function ContextPanel({
             </div>
           </>
         ) : (
-          <p className="context-breakdown__empty">Token usage appears after Codex reports the first completed turn.</p>
+          <p className="context-breakdown__empty">Live token composition appears after Codex reports the first turn update.</p>
         )}
       </section>
 

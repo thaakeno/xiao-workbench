@@ -1,13 +1,13 @@
 import { useLayoutEffect, useState } from "react";
 
-export type Theme = "system" | "light" | "dark";
+export type Theme = "system" | "light" | "dark" | "midnight";
 
 const STORAGE_KEY = "xiao.appearance.theme";
 
 const readStoredTheme = (): Theme => {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === "dark" || stored === "light" || stored === "system" ? stored : "system";
+    return stored === "dark" || stored === "light" || stored === "midnight" || stored === "system" ? stored : "system";
   } catch {
     return "system";
   }
@@ -23,7 +23,7 @@ export function useTheme() {
       document.documentElement.dataset.theme = resolved;
       document
         .querySelector('meta[name="theme-color"]')
-        ?.setAttribute("content", resolved === "dark" ? "#0d100e" : "#f6f4ee");
+        ?.setAttribute("content", resolved === "light" ? "#f6f4ee" : resolved === "midnight" ? "#090b0f" : "#0d100e");
     };
     apply();
     media.addEventListener("change", apply);

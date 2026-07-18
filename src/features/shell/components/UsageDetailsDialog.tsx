@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
@@ -35,8 +35,30 @@ const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumF
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const resetTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const remainingPercent = (used: number) => Math.max(0, Math.min(100, Number((100 - used).toFixed(1))));
+const quotaHistoryKey = "xiao.quota-observations.v1";
+type QuotaObservation = { at: number; sessionUsed: number | null; weeklyUsed: number | null; credits: number | null; event?: string };
+const readQuotaHistory = (): QuotaObservation[] => {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(quotaHistoryKey) ?? "[]");
+    return Array.isArray(value) ? value.slice(-80) : [];
+  } catch { return []; }
+};
+const countdown = (timestamp: number | null, now: number) => {
+  if (!timestamp) return "Reset time unavailable";
+  const seconds = Math.max(0, Math.floor(timestamp - now / 1_000));
+  if (seconds === 0) return "Resetting now";
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const remainder = seconds % 60;
+  return days ? `${days}d ${hours}h ${minutes}m` : hours ? `${hours}h ${minutes}m ${remainder}s` : `${minutes}m ${remainder}s`;
+};
 const estimateCost = (row: AgentThreadTokenUsage) => {
-  const basePrice = row.model ? prices[row.model.toLocaleLowerCase()] : undefined;
+  const model = row.model?.toLocaleLowerCase() ?? "";
+  const priceKey = Object.keys(prices)
+    .sort((left, right) => right.length - left.length)
+    .find((key) => model === key || model.startsWith(`${key}-`));
+  const basePrice = priceKey ? prices[priceKey] : undefined;
   if (!basePrice) return null;
   const uncached = Math.max(0, row.inputTokens - row.cachedInputTokens);
   return (uncached * basePrice.input + row.cachedInputTokens * basePrice.cached + row.outputTokens * basePrice.output) / 1_000_000;
@@ -45,6 +67,35 @@ const estimateCost = (row: AgentThreadTokenUsage) => {
 export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: UsageDetailsDialogProps) {
   const [range, setRange] = useState<Range>("all");
   const [scope, setScope] = useState<"global" | "app">("global");
+  const [now, setNow] = useState(Date.now());
+  const [quotaHistory, setQuotaHistory] = useState<QuotaObservation[]>(readQuotaHistory);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!rateLimits) return;
+    setQuotaHistory((current) => {
+      const previous = current.at(-1);
+      if (previous && rateLimits.updatedAt <= previous.at) return current;
+      const next: QuotaObservation = {
+        at: rateLimits.updatedAt,
+        sessionUsed: rateLimits.primary?.usedPercent ?? null,
+        weeklyUsed: rateLimits.secondary?.usedPercent ?? null,
+        credits: rateLimits.resetCredits?.availableCount ?? null,
+      };
+      if (previous?.credits != null && next.credits != null && next.credits > previous.credits) {
+        next.event = `${next.credits - previous.credits} reset credit${next.credits - previous.credits === 1 ? "" : "s"} added`;
+      } else if (previous?.weeklyUsed != null && next.weeklyUsed != null && previous.weeklyUsed - next.weeklyUsed >= 20) {
+        next.event = "Weekly quota refill observed";
+      } else if (previous?.sessionUsed != null && next.sessionUsed != null && previous.sessionUsed - next.sessionUsed >= 20) {
+        next.event = "Session quota refill observed";
+      }
+      const updated = [...current, next].slice(-80);
+      try { window.localStorage.setItem(quotaHistoryKey, JSON.stringify(updated)); } catch { /* history is optional */ }
+      return updated;
+    });
+  }, [rateLimits]);
   const rows = useMemo(() => {
     const threadMap = new Map(threads.map((thread) => [thread.id, thread]));
     const cutoff = range === "all" ? 0 : Date.now() - range * 86_400_000;
@@ -103,7 +154,7 @@ export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: Usag
   }, [range, rows]);
   const peakDay = Math.max(1, ...dailyRows.map((day) => day.tokens));
   const windows = [
-    rateLimits?.primary ? { label: "Session", value: rateLimits.primary } : null,
+    rateLimits?.primary ? { label: rateLimits.primary.windowDurationMins ? `${Math.round(rateLimits.primary.windowDurationMins / 60)} hour` : "Session", value: rateLimits.primary } : null,
     rateLimits?.secondary ? { label: "Weekly", value: rateLimits.secondary } : null,
   ].filter((item): item is NonNullable<typeof item> => item != null);
 
@@ -129,7 +180,27 @@ export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: Usag
               <div><dt>Sessions</dt><dd>{number.format(rows.length)}</dd></div><div><dt>Active days</dt><dd>{number.format(activeDays)}</dd></div><div><dt>Cache share</dt><dd>{input ? Math.round(cached / input * 100) : 0}%</dd></div><div><dt>Average</dt><dd>{compact.format(rows.length ? total / rows.length : 0)}</dd></div>
             </dl>
             <div className="usage-dialog__quota-stack">
-              {windows.map(({ label, value }) => { const remaining = remainingPercent(value.usedPercent); const urgency = remaining < 10 ? "is-critical" : remaining < 30 ? "is-warning" : ""; return <article className={urgency} key={label}><header><span>{label}</span><strong>{remaining}%</strong></header><i><b style={{ width: `${remaining}%` }} /></i><small>{value.resetsAt ? `Resets ${resetTime.format(value.resetsAt * 1_000)}` : "Reset unavailable"}</small></article>; })}
+              {windows.map(({ label, value }) => { const remaining = remainingPercent(value.usedPercent); const urgency = remaining < 10 ? "is-critical" : remaining < 30 ? "is-warning" : ""; return <article className={urgency} key={label}><header><span>{label} remaining</span><strong>{remaining}%</strong></header><i><b style={{ width: `${remaining}%` }} /></i><small><b>{countdown(value.resetsAt, now)}</b>{value.resetsAt ? ` · ${resetTime.format(value.resetsAt * 1_000)}` : ""}</small></article>; })}
+            </div>
+          </section>
+
+          <section className="usage-dialog__reset-center" aria-label="Rate limit resets">
+            <div className="usage-dialog__reset-summary">
+              <span><XiaoIcon name="refresh" size={16} /></span>
+              <div><small>Banked resets</small><strong>{rateLimits?.resetCredits?.availableCount ?? 0} available</strong><p>Reported directly by Codex and kept on this device.</p></div>
+            </div>
+            <div className="usage-dialog__credit-list">
+              {rateLimits?.resetCredits?.credits?.length ? rateLimits.resetCredits.credits.map((credit) => (
+                <article key={credit.id}>
+                  <div><strong>{credit.title ?? "Full rate-limit reset"}</strong><small>{credit.description ?? credit.status}</small></div>
+                  <span>{credit.expiresAt ? `Expires ${resetTime.format(credit.expiresAt * 1_000)}` : "No expiry reported"}</span>
+                </article>
+              )) : <p>No detailed reset credits are currently reported.</p>}
+            </div>
+            <div className="usage-dialog__quota-events">
+              <small>Recent local observations</small>
+              {quotaHistory.filter((item) => item.event).slice(-3).reverse().map((item) => <span key={item.at}><i />{item.event}<time>{new Date(item.at).toLocaleString()}</time></span>)}
+              {!quotaHistory.some((item) => item.event) ? <p>Refills and new credits will appear here when Codex reports them.</p> : null}
             </div>
           </section>
 
@@ -140,7 +211,7 @@ export function UsageDetailsDialog({ rateLimits, threads, usage, onClose }: Usag
           </section>
 
           <section className="usage-dialog__ranking"><header><div><span>Conversation ranking</span><h3>Most tokens used</h3></div><small>{rows.length} recorded sessions</small></header>{rows.length ? <div className="usage-dialog__rows">{rows.slice(0, 100).map((row, index) => <article key={row.threadId}><span className="usage-dialog__rank">{index + 1}</span><div className="usage-dialog__conversation"><strong title={row.title}>{row.title}</strong><small>{row.project} · {row.model ?? "model unavailable"}</small><i><b style={{ width: `${Math.max(1, row.totalTokens / largest * 100)}%` }} /></i></div><div className="usage-dialog__tokens"><strong>{compact.format(row.totalTokens)}</strong><small>{row.estimatedCost == null ? "Cost unavailable" : money.format(row.estimatedCost)}</small></div></article>)}</div> : <div className="usage-dialog__empty"><XiaoIcon name="runtime" size={22} /><strong>No token records in this period</strong><p>Some older Codex sessions did not persist token-count events.</p></div>}</section>
-          <section className="usage-dialog__models"><header><span>By model</span><h3>Token and cost mix</h3></header><div>{modelRows.map(([model, value]) => <article key={model}><strong>{model}</strong><span>{compact.format(value.input)} in</span><span>{compact.format(value.output)} out</span><span>{compact.format(value.cached)} cached</span><b>{value.cost == null ? "—" : money.format(value.cost)}</b></article>)}</div></section>
+          <section className="usage-dialog__models"><header><span>By model</span><h3>Token and cost mix</h3></header><div>{modelRows.map(([model, value]) => <article key={model} style={{ "--model-share": `${value.tokens / Math.max(1, total) * 100}%` } as React.CSSProperties}><strong>{model}<i><b /></i></strong><span>{compact.format(value.input)} in</span><span>{compact.format(value.output)} out</span><span>{compact.format(value.cached)} cached</span><b>{value.cost == null ? "—" : money.format(value.cost)}<small>{Math.round(value.tokens / Math.max(1, total) * 100)}%</small></b></article>)}</div></section>
         </div>
         <footer><span>Tokens are exact cumulative rollout counters. Cost applies current standard rates, without unverifiable long-context tiers or historical price changes; it is not your subscription bill.</span>{rateLimits?.updatedAt ? <span>Quota updated {new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(rateLimits.updatedAt)}</span> : null}</footer>
       </section>

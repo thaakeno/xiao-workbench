@@ -31,6 +31,7 @@ type TaskWorkspaceProps = {
   executionTaskId: string | null;
   taskTitle: string;
   taskArchived: boolean;
+  cliVersion: string | null;
   launchMode: boolean;
   taskStateError: string | null;
   taskStateLoading: boolean;
@@ -112,6 +113,7 @@ export function TaskWorkspace({
   executionTaskId,
   taskTitle,
   taskArchived,
+  cliVersion,
   launchMode,
   taskStateError,
   taskStateLoading,
@@ -373,6 +375,7 @@ export function TaskWorkspace({
         taskArchived={taskArchived}
         workspace={workspace}
         runtime={runtime}
+        cliVersion={cliVersion}
         latestRun={latestRun}
         contextPercent={contextPercent}
         archiveDisabled={environmentBusy || taskStateLoading || Boolean(taskStateError)}

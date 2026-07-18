@@ -129,10 +129,36 @@ const readRateLimits = (response: Record<string, unknown>): AgentRateLimits | nu
     ? value.credits as Record<string, unknown>
     : null;
   const balance = typeof credits?.balance === "string" ? Number(credits.balance) : null;
+  const resetCreditValue = response.rateLimitResetCredits;
+  const resetCreditRecord = resetCreditValue && typeof resetCreditValue === "object"
+    ? resetCreditValue as Record<string, unknown>
+    : null;
+  const resetCreditRows = Array.isArray(resetCreditRecord?.credits)
+    ? resetCreditRecord.credits.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== "object") return [];
+        const credit = candidate as Record<string, unknown>;
+        if (typeof credit.id !== "string") return [];
+        return [{
+          id: credit.id,
+          status: typeof credit.status === "string" ? credit.status : "available",
+          resetType: typeof credit.resetType === "string" ? credit.resetType : null,
+          grantedAt: typeof credit.grantedAt === "number" ? credit.grantedAt : null,
+          expiresAt: typeof credit.expiresAt === "number" ? credit.expiresAt : null,
+          title: typeof credit.title === "string" ? credit.title : null,
+          description: typeof credit.description === "string" ? credit.description : null,
+        }];
+      })
+    : null;
+  const availableResetCount = typeof resetCreditRecord?.availableCount === "number"
+    ? resetCreditRecord.availableCount
+    : resetCreditRows?.length ?? 0;
   return {
     primary: readWindow(value.primary),
     secondary: readWindow(value.secondary),
     creditsRemaining: balance != null && Number.isFinite(balance) ? balance : null,
+    rateLimitReachedType: typeof value.rateLimitReachedType === "string" ? value.rateLimitReachedType : null,
+    resetCredits: resetCreditRecord ? { availableCount: availableResetCount, credits: resetCreditRows } : null,
+    spendControlReached: typeof response.spendControlReached === "boolean" ? response.spendControlReached : null,
     updatedAt: Date.now(),
   };
 };
@@ -952,6 +978,32 @@ export function App() {
       writeSnapshot(rateLimitsSnapshotStorageKey, limits);
     }).catch(() => undefined);
     return () => { cancelled = true; };
+  }, [preferences.importCodexHistory]);
+
+  useEffect(() => {
+    if (!preferences.importCodexHistory || !isTauriHost()) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const refreshLimits = () => {
+      if (document.visibilityState !== "visible") return;
+      void nativeBridge.readCodexRateLimits().then((response) => {
+        if (cancelled) return;
+        const limits = readRateLimits(response);
+        if (!limits) return;
+        setRateLimits(limits);
+        writeSnapshot(rateLimitsSnapshotStorageKey, limits);
+      }).catch(() => undefined);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshLimits();
+    };
+    timer = window.setInterval(refreshLimits, 60_000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [preferences.importCodexHistory]);
 
   useEffect(() => {
@@ -2463,6 +2515,8 @@ export function App() {
               profile={profile}
               runtime={agent.runtime}
               usage={agent.usage}
+              tasks={tasks}
+              repositoryCount={projects.filter((project) => project.taskCount > 0).length}
               onClose={() => setActivePage("tasks")}
               onSaveProfile={saveProfile}
             />
@@ -2472,6 +2526,7 @@ export function App() {
               executionTaskId={executionTaskId}
               taskTitle={activeTask.title}
               taskArchived={activeTask.archived}
+              cliVersion={activeTask.threadBinding?.cliVersion ?? null}
               launchMode={focusedLaunch}
               taskStateError={taskStateError}
               taskStateLoading={activeTaskHistoryLoading}

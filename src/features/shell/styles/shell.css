@@ -1580,8 +1580,11 @@
 .usage-dialog__models > div { overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-raised); }
 .usage-dialog__models article { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(4, minmax(70px, auto)); gap: 14px; align-items: center; padding: 10px 13px; color: var(--muted-strong); font-size: var(--text-micro); font-variant-numeric: tabular-nums; }
 .usage-dialog__models article + article { border-top: 1px solid var(--line); }
-.usage-dialog__models article strong { color: var(--text-soft); font-size: var(--text-label); }
-.usage-dialog__models article b { color: var(--text); text-align: right; }
+.usage-dialog__models article strong { display: grid; min-width: 0; gap: 5px; color: var(--text-soft); font-size: var(--text-label); }
+.usage-dialog__models article strong > i { display: block; width: min(180px, 100%); height: 3px; overflow: hidden; border-radius: 99px; background: var(--surface-strong); }
+.usage-dialog__models article strong > i > b { display: block; width: var(--model-share); height: 100%; border-radius: inherit; background: var(--accent); }
+.usage-dialog__models article > b { display: flex; align-items: baseline; justify-content: flex-end; gap: 7px; color: var(--text); text-align: right; }
+.usage-dialog__models article > b small { color: var(--muted); font-size: 9px; font-weight: 540; }
 .usage-dialog__overview { display: grid; min-width: 0; grid-template-columns: 1.2fr 1fr 1.15fr; grid-template-rows: auto auto; margin: 14px 24px; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, var(--surface-raised)), var(--surface-raised) 56%); }
 .usage-dialog__headline,
 .usage-dialog__token-total { display: grid; min-width: 0; align-content: center; gap: 4px; padding: 19px 20px; }
@@ -1608,11 +1611,38 @@
 .usage-dialog__quota-stack article > i { display: block; height: 4px; overflow: hidden; border-radius: 999px; background: var(--surface-strong); }
 .usage-dialog__quota-stack article > i > b { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 350ms ease; }
 .usage-dialog__quota-stack article > small { color: var(--muted); font-size: var(--text-micro); }
+.usage-dialog__quota-stack article > small b { color: var(--muted-strong); font-weight: 610; font-variant-numeric: tabular-nums; }
 .usage-dialog__quota-stack article.is-warning header strong { color: #f5ad42; }
 .usage-dialog__quota-stack article.is-warning > i > b { background: #e89a2d; }
 .usage-dialog__quota-stack article.is-critical header strong { color: #ef6969; }
 .usage-dialog__quota-stack article.is-critical > i > b { background: #e65353; animation: quota-bar-critical 1.8s ease-in-out infinite; }
 @keyframes quota-bar-critical { 50% { filter: brightness(1.28); box-shadow: 0 0 9px color-mix(in srgb, #ef5b5b 50%, transparent); } }
+
+.usage-dialog__reset-center { display: grid; min-width: 0; grid-template-columns: minmax(190px, .8fr) minmax(240px, 1.2fr) minmax(220px, 1fr); margin: 0 24px 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); }
+.usage-dialog__reset-center > div { min-width: 0; padding: 16px 18px; }
+.usage-dialog__reset-center > div + div { border-left: 1px solid var(--line); }
+.usage-dialog__reset-summary { display: flex; align-items: flex-start; gap: 12px; }
+.usage-dialog__reset-summary > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: var(--success-soft); color: var(--success); }
+.usage-dialog__reset-summary > div { display: grid; min-width: 0; gap: 3px; }
+.usage-dialog__reset-summary small,
+.usage-dialog__quota-events > small { color: var(--muted); font-size: var(--text-micro); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.usage-dialog__reset-summary strong { color: var(--text); font-size: 17px; }
+.usage-dialog__reset-summary p,
+.usage-dialog__credit-list > p,
+.usage-dialog__quota-events > p { margin: 2px 0 0; color: var(--muted); font-size: var(--text-micro); line-height: 1.45; }
+.usage-dialog__credit-list { display: grid; align-content: center; gap: 8px; }
+.usage-dialog__credit-list article { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+.usage-dialog__credit-list article > div { display: grid; min-width: 0; gap: 2px; }
+.usage-dialog__credit-list strong,
+.usage-dialog__credit-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-dialog__credit-list strong { color: var(--text-soft); font-size: var(--text-label); }
+.usage-dialog__credit-list small,
+.usage-dialog__credit-list article > span { color: var(--muted); font-size: var(--text-micro); }
+.usage-dialog__credit-list article > span { flex: 0 0 auto; }
+.usage-dialog__quota-events { display: grid; align-content: center; gap: 7px; }
+.usage-dialog__quota-events > span { display: grid; min-width: 0; grid-template-columns: 6px minmax(0, 1fr) auto; align-items: center; gap: 7px; color: var(--text-soft); font-size: var(--text-micro); }
+.usage-dialog__quota-events > span > i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+.usage-dialog__quota-events time { color: var(--muted); font-size: 9px; }
 
 .usage-dialog__activity { margin: 0 24px 14px; padding: 17px 18px 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); }
 .usage-dialog__activity > header { display: flex; align-items: end; justify-content: space-between; margin-bottom: 14px; }
@@ -1648,6 +1678,8 @@
   .usage-dialog__quick-stats { grid-column: 1 / -1; border-top: 1px solid var(--line); border-left: 0; }
   .usage-dialog__filters small { display: none; }
   .usage-dialog__heatmap { grid-template-columns: repeat(15, minmax(5px, 1fr)); }
+  .usage-dialog__reset-center { grid-template-columns: 1fr; }
+  .usage-dialog__reset-center > div + div { border-top: 1px solid var(--line); border-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

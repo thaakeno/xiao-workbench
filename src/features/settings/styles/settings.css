@@ -193,6 +193,12 @@
   background: #232322;
 }
 
+.theme-option--midnight .theme-option__preview { background: #0d1015; }
+.theme-option--midnight .theme-preview__rail { background: #101319; }
+.theme-option--midnight .theme-preview__header { background: #171b23; }
+.theme-option--midnight .theme-preview__line { background: #747d8d; }
+.theme-option--midnight .theme-preview__accent { background: #77b7f1; }
+
 .theme-preview__rail,
 .theme-preview__header,
 .theme-preview__line,

@@ -9,6 +9,7 @@ type TaskHeaderProps = {
   taskId: string;
   taskTitle: string;
   taskArchived: boolean;
+  cliVersion: string | null;
   workspace: WorkspaceSnapshot;
   runtime: AgentRuntimeState;
   latestRun: RunSnapshot | null;
@@ -49,6 +50,7 @@ export function TaskHeader({
   taskId,
   taskTitle,
   taskArchived,
+  cliVersion,
   workspace,
   runtime,
   latestRun,
@@ -97,7 +99,7 @@ export function TaskHeader({
           className={`task-header__runtime task-header__runtime--${runtime.phase}`}
           role="status"
           aria-live="polite"
-          title={runtime.error ?? undefined}
+          title={runtime.error ?? (cliVersion ? `Codex CLI ${cliVersion} · local app-server connected` : "Local Codex app-server connected")}
         >
           <i />
           {runtimeLabel}

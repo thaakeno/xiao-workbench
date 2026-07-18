@@ -52,6 +52,7 @@ const themes: Array<{ id: Theme; label: string; description: string }> = [
   { id: "system", label: "System", description: "Follow the Windows appearance automatically." },
   { id: "light", label: "Light", description: "Warm paper surfaces with crisp code contrast." },
   { id: "dark", label: "Dark", description: "A low-glare graphite workspace for long runs." },
+  { id: "midnight", label: "Midnight", description: "Deep contrast, quieter chrome, and brighter code detail." },
 ];
 
 const sections: Array<{ id: SettingsSection; label: string; icon: XiaoIconName; group: string }> = [

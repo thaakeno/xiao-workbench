@@ -80,3 +80,37 @@
   --shadow-panel: 0 24px 70px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.25);
   --shadow-composer: 0 8px 30px rgba(0, 0, 0, 0.26), 0 1px 4px rgba(0, 0, 0, 0.32);
 }
+
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg: #090b0f;
+  --chrome: #0c0f14;
+  --panel: #101319;
+  --canvas: #0d1015;
+  --surface: #151922;
+  --surface-raised: #171b23;
+  --surface-hover: #1d2330;
+  --surface-strong: #293140;
+  --surface-deep: #0b0e13;
+  --code-surface: #090c11;
+  --text: #f4f6fa;
+  --text-soft: #cbd1dc;
+  --muted: #747d8d;
+  --muted-strong: #9aa4b5;
+  --line: rgba(210, 220, 238, 0.075);
+  --line-strong: rgba(210, 220, 238, 0.14);
+  --accent: #f3f6fb;
+  --accent-bright: #ffffff;
+  --accent-soft: rgba(181, 199, 231, 0.08);
+  --accent-ink: #0b0e13;
+  --info: #77b7f1;
+  --danger: #f07f8c;
+  --danger-soft: rgba(240, 127, 140, 0.11);
+  --warning: #e6b467;
+  --success: #76d09b;
+  --success-soft: rgba(118, 208, 155, 0.11);
+  --focus: rgba(119, 183, 241, 0.76);
+  --backdrop: rgba(0, 0, 0, 0.72);
+  --shadow-panel: 0 30px 90px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.32);
+  --shadow-composer: 0 10px 38px rgba(0, 0, 0, 0.34), 0 1px 5px rgba(0, 0, 0, 0.42);
+}

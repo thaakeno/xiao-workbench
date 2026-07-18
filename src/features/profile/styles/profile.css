@@ -509,6 +509,55 @@
   font-family: var(--font-mono);
 }
 
+.profile-contribution-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--line);
+}
+
+.profile-contribution-grid article {
+  display: grid;
+  min-height: 132px;
+  align-content: center;
+  gap: 7px;
+  padding: 20px;
+  background: var(--surface-raised);
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.profile-contribution-grid article:hover {
+  z-index: 1;
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.profile-contribution-grid article > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--muted-strong);
+}
+
+.profile-contribution-grid article > strong {
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-contribution-grid article > small {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
 .profile-modal {
   position: fixed;
   z-index: 200;
@@ -724,6 +773,7 @@
 }
 
 @media (max-width: 760px) {
+  .profile-contribution-grid { grid-template-columns: 1fr 1fr; }
   .profile-hero__inner {
     min-height: 0;
     grid-template-columns: minmax(0, 1fr);

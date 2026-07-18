@@ -81,7 +81,7 @@
   color: #7652d8;
 }
 
-:root[data-theme="dark"] .composer__tools-left .reasoning-picker__trigger.is-ultra {
+:root:is([data-theme="dark"], [data-theme="midnight"]) .composer__tools-left .reasoning-picker__trigger.is-ultra {
   color: #b49af8;
 }
 

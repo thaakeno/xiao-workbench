@@ -6,6 +6,7 @@ import type {
   AgentRuntimeState,
   CodexUsageSnapshot,
 } from "../../../core/models/agent";
+import type { XiaoTaskDocument } from "../../../core/models/xiao";
 import {
   profileInitials,
   type LocalUserProfile,
@@ -17,30 +18,13 @@ type ProfilePageProps = {
   profile: LocalUserProfile;
   runtime: AgentRuntimeState;
   usage: CodexUsageSnapshot;
+  tasks: XiaoTaskDocument[];
+  repositoryCount: number;
   onClose: () => void;
   onSaveProfile: (profile: LocalUserProfile) => void;
 };
 
 const fullNumber = new Intl.NumberFormat();
-const compactNumber = (value: number) => {
-  const units = [
-    { threshold: 1_000_000_000_000, suffix: "T" },
-    { threshold: 1_000_000_000, suffix: "B" },
-    { threshold: 1_000_000, suffix: "M" },
-    { threshold: 1_000, suffix: "K" },
-  ];
-  const unit = units.find(({ threshold }) => Math.abs(value) >= threshold);
-  if (!unit) return fullNumber.format(value);
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value / unit.threshold)}${unit.suffix}`;
-};
-const compactDuration = (seconds: number | null | undefined) => {
-  if (!seconds) return "--";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const hours = Math.floor(seconds / 3_600);
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  return `${hours}h ${minutes}m`;
-};
 const monthLabel = new Intl.DateTimeFormat(undefined, { month: "short" });
 const dayLabel = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const avatarSize = 256;
@@ -121,6 +105,8 @@ export function ProfilePage({
   profile,
   runtime,
   usage,
+  tasks,
+  repositoryCount,
   onClose,
   onSaveProfile,
 }: ProfilePageProps) {
@@ -156,35 +142,22 @@ export function ProfilePage({
   const days = contributionDays(activityUsage);
   const monthLabels = days.filter((day, index) => day.date.getDate() <= 7 && index % 7 === 0);
   const connected = runtime.phase === "ready" || runtime.phase === "working";
-  const peakDailyTokens =
-    accountUsage?.peakDailyTokens ?? Math.max(0, ...activityUsage.days.map((day) => day.totalTokens));
-  const tokenRows = [
-    {
-      id: "input",
-      label: "Input",
-      description: "Prompts and attached context",
-      value: usage.totals.inputTokens,
+  const peakDay = activityUsage.days.reduce<(typeof activityUsage.days)[number] | null>(
+    (peak, day) => !peak || day.totalTokens > peak.totalTokens ? day : peak,
+    null,
+  );
+  const contributions = tasks.reduce(
+    (total, task) => {
+      const completed = task.timeline.some((entry) => entry.kind === "result" && entry.title === "Agent response" && entry.status !== "active");
+      if (completed) total.tasksCompleted += 1;
+      for (const entry of task.timeline) {
+        if (entry.kind === "command") total.commands += 1;
+        if (entry.kind === "change") total.filesModified += entry.files?.length ?? 0;
+      }
+      return total;
     },
-    {
-      id: "cached",
-      label: "Cached input",
-      description: "Context reused by Codex",
-      value: usage.totals.cachedInputTokens,
-    },
-    {
-      id: "output",
-      label: "Output",
-      description: "Responses and tool results",
-      value: usage.totals.outputTokens,
-    },
-    {
-      id: "reasoning",
-      label: "Reasoning",
-      description: "Internal reasoning output",
-      value: usage.totals.reasoningOutputTokens,
-    },
-  ];
-  const maxTokenRow = Math.max(1, ...tokenRows.map((row) => row.value));
+    { tasksCompleted: 0, filesModified: 0, commands: 0 },
+  );
 
   const openEditor = () => {
     setDraftName(profile.name);
@@ -266,11 +239,9 @@ export function ProfilePage({
           </div>
 
           <div className="profile-hero__usage">
-            <span>Codex lifetime</span>
-            <strong title={fullNumber.format(activityUsage.totals.totalTokens)}>
-              {compactNumber(activityUsage.totals.totalTokens)}
-            </strong>
-            <small>{fullNumber.format(activityUsage.totals.totalTokens)} tokens reported by Codex</small>
+            <span>Xiao contributions</span>
+            <strong>{fullNumber.format(contributions.tasksCompleted)}</strong>
+            <small>completed tasks in the loaded workspace</small>
           </div>
         </div>
       </header>
@@ -334,55 +305,39 @@ export function ProfilePage({
                 </div>
                 <div>
                   <dt>Peak day</dt>
-                  <dd title={fullNumber.format(peakDailyTokens)}>{compactNumber(peakDailyTokens)}</dd>
+                  <dd title={peakDay ? `${fullNumber.format(peakDay.totalTokens)} tokens` : undefined}>
+                    {peakDay ? new Date(`${peakDay.date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "--"}
+                  </dd>
                 </div>
                 <div>
-                  <dt>Longest turn</dt>
-                  <dd>{compactDuration(accountUsage?.longestRunningTurnSec)}</dd>
+                  <dt>Window</dt>
+                  <dd>365 days</dd>
                 </div>
               </dl>
             </aside>
           </div>
         </section>
 
-        <section className="profile-ledger" aria-labelledby="profile-ledger-title">
+        <section className="profile-ledger profile-contributions" aria-labelledby="profile-ledger-title">
           <header className="profile-section-heading">
             <div>
-              <span>Local ledger</span>
-              <h2 id="profile-ledger-title">Token flow through Xiao</h2>
+              <span>Local craft</span>
+              <h2 id="profile-ledger-title">Xiao contributions</h2>
             </div>
-            <div className="profile-ledger__total">
-              <span>Observed total</span>
-              <strong title={fullNumber.format(usage.totals.totalTokens)}>
-                {compactNumber(usage.totals.totalTokens)}
-              </strong>
-            </div>
+            <p>Derived from locally saved task activity</p>
           </header>
 
-          <div className="profile-token-rows">
-            {tokenRows.map((row) => (
-              <div className={`profile-token-row profile-token-row--${row.id}`} key={row.id}>
-                <div>
-                  <strong>{row.label}</strong>
-                  <span>{row.description}</span>
-                </div>
-                <div className="profile-token-meter" aria-hidden="true">
-                  <i
-                    style={{
-                      width: `${row.value ? Math.max(3, (row.value / maxTokenRow) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-                <strong title={fullNumber.format(row.value)}>{compactNumber(row.value)}</strong>
-              </div>
-            ))}
+          <div className="profile-contribution-grid">
+            <article><span><XiaoIcon name="check" size={16} /></span><strong>{fullNumber.format(contributions.tasksCompleted)}</strong><small>Tasks completed</small></article>
+            <article><span><XiaoIcon name="branch" size={16} /></span><strong>{fullNumber.format(repositoryCount)}</strong><small>Repos reviewed</small></article>
+            <article><span><XiaoIcon name="mutation" size={16} /></span><strong>{fullNumber.format(contributions.filesModified)}</strong><small>Files modified</small></article>
+            <article><span><XiaoIcon name="command" size={16} /></span><strong>{fullNumber.format(contributions.commands)}</strong><small>Commands executed</small></article>
           </div>
 
           <footer className="profile-ledger__note">
             <XiaoIcon name="result" size={15} />
             <p>
-              Values come from <code>thread/tokenUsage/updated</code>. Xiao stores emitted deltas;
-              it does not estimate tokens from text.
+              Contributions stay on this device. Token totals and quota analytics live in Usage.
             </p>
           </footer>
         </section>
