@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import type { AgentRuntimeState, TimelineEntry } from "../../../core/models/agent";
 import { ActivityItem } from "./ActivityItem";
@@ -10,6 +12,7 @@ type TaskTimelineProps = {
   showReasoningSummaries: boolean;
   expandToolOutput: boolean;
   historyLoading: boolean;
+  historyHasMore: boolean;
   canFork: boolean;
   onForkTask: (entryId: string) => void;
   onResolveApproval: (
@@ -23,9 +26,8 @@ type TaskTimelineProps = {
   canUndo: boolean;
   undoing: boolean;
   onUndo: () => void;
-  historyHasMore: boolean;
   historyLoadingOlder: boolean;
-  onLoadOlderHistory: () => void;
+  onLoadOlderHistory: () => Promise<void>;
 };
 
 type TimelineRow =
@@ -75,7 +77,7 @@ export const compactTimelineChanges = (
   });
 };
 
-const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
+export const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
   const rows: TimelineRow[] = [];
   let index = 0;
 
@@ -116,12 +118,16 @@ const timelineRows = (timeline: TimelineEntry[]): TimelineRow[] => {
   return rows;
 };
 
+export const visibleTimelineRows = (rows: TimelineRow[], count: number) =>
+  rows.length > count ? rows.slice(rows.length - count) : rows;
+
 export function TaskTimeline({
   timeline,
   runtime,
   showReasoningSummaries,
   expandToolOutput,
   historyLoading,
+  historyHasMore,
   canFork,
   onForkTask,
   taskId,
@@ -130,7 +136,6 @@ export function TaskTimeline({
   canUndo,
   undoing,
   onUndo,
-  historyHasMore,
   historyLoadingOlder,
   onLoadOlderHistory,
 }: TaskTimelineProps) {
@@ -142,24 +147,34 @@ export function TaskTimeline({
       break;
     }
   }
-  const displayTimeline = compactTimelineChanges(timeline, taskWorking ? latestUserIndex : undefined);
-  const rows = timelineRows(displayTimeline);
+  const displayTimeline = useMemo(
+    () => compactTimelineChanges(timeline, taskWorking ? latestUserIndex : undefined),
+    [latestUserIndex, taskWorking, timeline],
+  );
+  const rows = useMemo(() => timelineRows(displayTimeline), [displayTimeline]);
   const latestChangeId = [...displayTimeline].reverse().find((entry) => entry.kind === "change")?.id;
+  const [visibleRowCount, setVisibleRowCount] = useState(240);
+  useEffect(() => setVisibleRowCount(240), [taskId]);
+  const hiddenRows = Math.max(0, rows.length - visibleRowCount);
+  const visibleRows = visibleTimelineRows(rows, visibleRowCount);
+  const revealEarlier = async () => {
+    if (hiddenRows) {
+      setVisibleRowCount((count) => count + 240);
+      return;
+    }
+    await onLoadOlderHistory();
+    setVisibleRowCount((count) => count + 240);
+  };
   return (
     <div className="timeline" aria-live="polite">
-      {historyHasMore ? (
-        <button
-          className="timeline__load-older"
-          type="button"
-          disabled={historyLoadingOlder}
-          onClick={onLoadOlderHistory}
-        >
-          <XiaoIcon className={historyLoadingOlder ? "spin" : undefined} name={historyLoadingOlder ? "pending" : "archive"} size={14} />
-          {historyLoadingOlder ? "Loading older messages" : "Load older messages"}
-        </button>
-      ) : null}
       {historyLoading ? (
         <div className="timeline__history-loading">Loading earlier task activity…</div>
+      ) : null}
+      {!historyLoading && (hiddenRows > 0 || historyHasMore) ? (
+        <button className="timeline__load-earlier" type="button" disabled={historyLoadingOlder} onClick={() => void revealEarlier()}>
+          {historyLoadingOlder ? "Loading earlier activity" : "Show earlier activity"}
+          <small>{hiddenRows > 0 ? `${Math.min(hiddenRows, 240)} cached items` : "Load from local history"}</small>
+        </button>
       ) : null}
       {!displayTimeline.length && !historyLoading ? (
         <div className="timeline__empty">
@@ -168,7 +183,7 @@ export function TaskTimeline({
           <p>Describe the outcome below. Xiao will keep the work, commands, and changes in this task.</p>
         </div>
       ) : null}
-      {rows.map((row) =>
+      {visibleRows.map((row) =>
         row.kind === "exploration" ? (
           <ExplorationGroup
             entries={row.entries}

@@ -677,7 +677,7 @@ export function App() {
   } = useWorkspace(activeProjectPath, executionTaskId);
   const routineController = useRoutines(workspace.path);
   const activeTaskHistoryLoading = Boolean(
-    selectedTask && !selectedTask.timelineComplete && !taskHistoryError,
+    selectedTask && taskHistoryLoadingId === selectedTask.id && !taskHistoryError,
   );
   const activeEnvironmentBusy = environmentBusyTaskId === activeTask.id;
   const taskStateError = taskLoadError ?? taskHistoryError ?? taskSaveError;
@@ -947,6 +947,7 @@ export function App() {
       taskWorkspacePath !== workspace.path ||
       !selectedTask ||
       selectedTask.timelineComplete ||
+      selectedTask.timelineLoaded ||
       taskHistoryLoadingId === selectedTask.id
     ) return;
 
@@ -2389,7 +2390,7 @@ export function App() {
               showReasoningSummaries={preferences.showReasoningSummaries}
               expandToolOutput={preferences.expandToolOutput}
               showChatExport={preferences.showChatExport}
-              historyHasMore={Boolean(activeTask.historyCursor)}
+              historyHasMore={Boolean(activeTask.historyCursor) || Boolean(selectedTask && !selectedTask.timelineComplete)}
               historyLoadingOlder={Boolean(activeTask.historyLoadingOlder)}
               launchBrand={preferences.launchBrand}
               workspace={workspace}
@@ -2438,12 +2439,36 @@ export function App() {
               onReviewContextSent={clearReviewContext}
               onResolveQuestion={agent.resolveQuestion}
               onDraftChange={(draftText) => updateTaskDraft(activeTask.id, draftText)}
+              onLoadOlderHistory={async () => {
+                if (activeTask.origin === "codex") {
+                  await loadOlderCodexHistory();
+                  return;
+                }
+                if (
+                  !selectedTask ||
+                  selectedTask.timelineComplete ||
+                  taskHistoryLoadingId === selectedTask.id
+                ) return;
+                const taskId = selectedTask.id;
+                const before = selectedTask.timelineLoaded ? selectedTask.timelineStart : null;
+                setTaskHistoryLoadingId(taskId);
+                setTaskHistoryError(null);
+                try {
+                  const page = await nativeBridge.loadXiaoTimelinePage(workspace.path, taskId, before);
+                  setTasks((current) => current.map((task) =>
+                    task.id === taskId ? mergeTimelinePage(task, page) : task,
+                  ));
+                } catch (reason) {
+                  setTaskHistoryError(reason instanceof Error ? reason.message : String(reason));
+                } finally {
+                  setTaskHistoryLoadingId((current) => current === taskId ? null : current);
+                }
+              }}
               onResolveApproval={agent.resolveApproval}
               onFocusView={openFocusView}
               onToggleArchived={() => {
                 if (selectedTask) setTaskArchived(selectedTask.id, !selectedTask.archived);
               }}
-              onLoadOlderHistory={() => void loadOlderCodexHistory()}
             />
           )
         }

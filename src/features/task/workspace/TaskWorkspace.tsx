@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { XiaoIcon } from "../../../components/icons/XiaoIcon";
 import {
@@ -81,6 +81,7 @@ type TaskWorkspaceProps = {
   onRemoveReviewContext: (attachmentId: string) => void;
   onReviewContextSent: () => void;
   onDraftChange: (draftText: string) => void;
+  onLoadOlderHistory: () => Promise<void>;
   onResolveQuestion: (
     requestId: number | string,
     answers: Record<string, string[]>,
@@ -104,7 +105,6 @@ type TaskWorkspaceProps = {
   ) => Promise<void>;
   onFocusView: (view: FocusView) => void;
   onToggleArchived: () => void;
-  onLoadOlderHistory: () => void;
 };
 
 export function TaskWorkspace({
@@ -162,6 +162,7 @@ export function TaskWorkspace({
   onRemoveReviewContext,
   onReviewContextSent,
   onDraftChange,
+  onLoadOlderHistory,
   onResolveQuestion,
   onModelChange,
   onReasoningEffortChange,
@@ -177,12 +178,14 @@ export function TaskWorkspace({
   onResolveApproval,
   onFocusView,
   onToggleArchived,
-  onLoadOlderHistory,
 }: TaskWorkspaceProps) {
   const scrollArea = useRef<HTMLDivElement>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const followLiveOutput = useRef(true);
   const previousWorking = useRef(false);
+  const previousTimelineLength = useRef(timeline.length);
+  const scrollPositions = useRef(new Map<string, number>());
+  const loadingOlder = useRef(false);
   const taskWorking = runtime.phase === "working" && runtime.taskId === taskId;
   const canFork =
     runtime.phase === "ready" &&
@@ -201,13 +204,50 @@ export function TaskWorkspace({
   useLayoutEffect(() => {
     const node = scrollArea.current;
     if (!node) return;
+    const savedPosition = scrollPositions.current.get(taskId);
+    node.scrollTop = savedPosition ?? node.scrollHeight;
+    followLiveOutput.current = savedPosition === undefined;
+    previousTimelineLength.current = timeline.length;
+    return () => {
+      scrollPositions.current.set(taskId, node.scrollTop);
+    };
+  }, [taskId]);
+
+  useEffect(() => {
+    const node = scrollArea.current;
+    if (!node) return;
     if (taskWorking && !previousWorking.current) {
       followLiveOutput.current = true;
     }
     previousWorking.current = taskWorking;
-    if (followLiveOutput.current) node.scrollTop = node.scrollHeight;
-    setShowScrollBottom(node.scrollHeight - node.scrollTop - node.clientHeight >= 120);
-  }, [taskId, taskWorking, timeline]);
+    const appended = timeline.length >= previousTimelineLength.current;
+    previousTimelineLength.current = timeline.length;
+    if (!followLiveOutput.current || !appended) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (scrollArea.current === node) {
+        node.scrollTop = node.scrollHeight;
+        setShowScrollBottom(false);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [taskId, taskWorking, timeline.length]);
+
+  const loadOlderHistory = async () => {
+    const node = scrollArea.current;
+    if (!node || loadingOlder.current) return;
+    loadingOlder.current = true;
+    const previousHeight = node.scrollHeight;
+    const previousTop = node.scrollTop;
+    try {
+      await onLoadOlderHistory();
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        if (scrollArea.current !== node) return;
+        node.scrollTop = previousTop + Math.max(0, node.scrollHeight - previousHeight);
+      }));
+    } finally {
+      loadingOlder.current = false;
+    }
+  };
 
   const scrollToEntry = (entryId: string) => {
     document.getElementById(`timeline-entry-${entryId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -346,6 +386,7 @@ export function TaskWorkspace({
         onUndo={onUndo}
       />
       <div
+        key={taskId}
         className="task-workspace__scroll"
         ref={scrollArea}
         onScroll={(event) => {
@@ -362,6 +403,7 @@ export function TaskWorkspace({
           showReasoningSummaries={showReasoningSummaries}
           expandToolOutput={expandToolOutput}
           historyLoading={taskStateLoading}
+          historyHasMore={historyHasMore}
           canFork={canFork}
           onForkTask={onForkTask}
           onResolveApproval={onResolveApproval}
@@ -369,9 +411,8 @@ export function TaskWorkspace({
           canUndo={canUndo}
           undoing={undoing}
           onUndo={onUndo}
-          historyHasMore={historyHasMore}
           historyLoadingOlder={historyLoadingOlder}
-          onLoadOlderHistory={onLoadOlderHistory}
+          onLoadOlderHistory={loadOlderHistory}
         />
       </div>
       <MessageNavigator timeline={timeline} onJump={scrollToEntry} />
