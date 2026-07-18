@@ -15,10 +15,17 @@
     </script>
     <style>
       html,body,#root{min-height:100%;margin:0;background:#f7f7f5}html[data-theme="dark"],html[data-theme="dark"] body,html[data-theme="dark"] #root{background:#171716}
-      #xiao-boot{position:fixed;inset:0;display:grid;place-items:center;color:#262623;font:600 14px/1.2 "Segoe UI Variable Text","Segoe UI",sans-serif;letter-spacing:-.01em}
-      #xiao-boot span{display:flex;align-items:center;gap:11px;padding:10px 14px;border:1px solid rgba(127,127,120,.14);border-radius:15px;background:rgba(255,255,255,.36);box-shadow:0 8px 30px rgba(20,20,18,.04)}
-      #xiao-boot img{width:30px;height:30px}
-      html[data-theme="dark"] #xiao-boot{color:#eeeeea}html[data-theme="dark"] #xiao-boot span{background:rgba(255,255,255,.035);box-shadow:0 8px 30px rgba(0,0,0,.12)}
+      #xiao-boot{position:fixed;inset:0;display:grid;place-items:center;color:#262623;font-family:"Segoe UI Variable Text","Segoe UI",sans-serif}
+      #xiao-boot>div{display:grid;min-width:148px;place-items:center;gap:4px}
+      #xiao-boot .mark{display:grid;width:56px;height:56px;margin-bottom:7px;place-items:center;border:1px solid rgba(127,127,120,.16);border-radius:18px;background:rgba(255,255,255,.42);box-shadow:0 12px 34px rgba(20,20,18,.07)}
+      #xiao-boot img{display:block;width:32px;height:32px;image-rendering:auto}
+      #xiao-boot strong{font-size:16px;font-weight:650;letter-spacing:-.025em}
+      #xiao-boot small{color:#777771;font-size:11px;font-weight:520;letter-spacing:.12em;text-transform:uppercase}
+      #xiao-boot i{position:relative;width:54px;height:2px;margin-top:12px;overflow:hidden;border-radius:9px;background:rgba(127,127,120,.14)}
+      #xiao-boot i::after{position:absolute;inset:0;width:42%;border-radius:inherit;background:#e78743;content:"";animation:xiao-boot-progress 1.05s ease-in-out infinite}
+      @keyframes xiao-boot-progress{0%{transform:translateX(-125%)}50%{transform:translateX(72%)}100%{transform:translateX(240%)}}
+      html[data-theme="dark"] #xiao-boot{color:#eeeeea}html[data-theme="dark"] #xiao-boot .mark{background:rgba(255,255,255,.045);box-shadow:0 12px 34px rgba(0,0,0,.18)}html[data-theme="dark"] #xiao-boot small{color:#96968f}
+      @media(prefers-reduced-motion:reduce){#xiao-boot i::after{animation:none;transform:translateX(70%)}}
     </style>
     <link rel="icon" href="/xiao-mark.png" type="image/png" />
     <meta
@@ -28,7 +35,7 @@
     <title>Xiao Workbench</title>
   </head>
   <body>
-    <div id="root"><div id="xiao-boot"><span><img src="/xiao-mark.png" alt="" /><strong>Xiao Workbench</strong></span></div></div>
+    <div id="root"><div id="xiao-boot" role="status" aria-label="Starting Xiao Workbench"><div><span class="mark"><img src="data:image/png;base64,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" alt="" /></span><strong>Xiao</strong><small>Workbench</small><i aria-hidden="true"></i></div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
