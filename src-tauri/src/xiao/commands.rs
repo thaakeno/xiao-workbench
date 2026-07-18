@@ -1,7 +1,8 @@
 use tauri::State;
 
 use super::models::{
-    XiaoProjectSummary, XiaoTimelinePage, XiaoWorkspaceDocument, XiaoWorkspaceUpdate,
+    XiaoContributionSummary, XiaoProjectSummary, XiaoTimelinePage, XiaoWorkspaceDocument,
+    XiaoWorkspaceUpdate,
 };
 use super::repository::XiaoRepository;
 use super::service;
@@ -43,6 +44,13 @@ pub fn list_xiao_projects(
     repository: State<'_, XiaoRepository>,
 ) -> Result<Vec<XiaoProjectSummary>, String> {
     service::list_projects(&repository)
+}
+
+#[tauri::command]
+pub fn read_xiao_contribution_summary(
+    repository: State<'_, XiaoRepository>,
+) -> Result<XiaoContributionSummary, String> {
+    service::contribution_summary(&repository)
 }
 
 #[tauri::command]

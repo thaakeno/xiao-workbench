@@ -98,9 +98,10 @@ export function ContextPanel({
     <section className="context-panel">
       <header className="context-panel__hero">
         <div>
-          <span>Session context</span>
+          <span className="context-panel__eyebrow">Session context</span>
           <h2>{taskTitle}</h2>
-          <p>Live context from this Xiao task, not account-wide usage.</p>
+          <p>Active-turn context and persisted session telemetry, isolated from account usage.</p>
+          <span className={normalizedUsage ? "context-panel__signal is-live" : "context-panel__signal"}><i />{normalizedUsage ? "Telemetry connected" : "Waiting for first token update"}</span>
         </div>
         <div
           className="context-panel__meter"
@@ -116,8 +117,8 @@ export function ContextPanel({
       <div className="context-facts">
         <div><span>Messages</span><strong>{number.format(timeline.length)}</strong></div>
         <div><span>Model</span><strong>{model?.displayName ?? selectedModel ?? "Default"}</strong></div>
-        <div><span>Session tokens</span><strong>{sessionUsage ? number.format(sessionUsage.totalTokens) : "Not reported"}</strong></div>
-        <div><span>Context limit</span><strong>{contextLimit ? number.format(contextLimit) : "Not reported"}</strong></div>
+        <div><span>Session tokens</span><strong>{sessionUsage ? number.format(sessionUsage.totalTokens) : "Awaiting Codex"}</strong></div>
+        <div><span>Context limit</span><strong>{contextLimit ? number.format(contextLimit) : "Model default unavailable"}</strong></div>
         <div><span>Thread</span><strong>{threadId ? threadId.slice(0, 12) : "Not started"}</strong></div>
         <div><span>Last activity</span><strong>{time.format(lastActivity)}</strong></div>
       </div>

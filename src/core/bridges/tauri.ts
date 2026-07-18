@@ -6,6 +6,7 @@ import type {
   AgentModelSummary,
   AgentThreadTokenUsage,
 } from "../models/agent";
+import type { XiaoContributionSummary } from "../models/xiao";
 import type {
   CodexUpdateResult,
   CodexUpdateStatus,
@@ -342,6 +343,10 @@ export const nativeBridge = {
 
   listXiaoProjects() {
     return invoke<XiaoProjectSummary[]>("list_xiao_projects");
+  },
+
+  readXiaoContributionSummary() {
+    return invoke<XiaoContributionSummary>("read_xiao_contribution_summary");
   },
 
   openXiaoProject(path: string) {

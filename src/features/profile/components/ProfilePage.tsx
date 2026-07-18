@@ -6,7 +6,7 @@ import type {
   AgentRuntimeState,
   CodexUsageSnapshot,
 } from "../../../core/models/agent";
-import type { XiaoTaskDocument } from "../../../core/models/xiao";
+import type { XiaoContributionSummary } from "../../../core/models/xiao";
 import {
   profileInitials,
   type LocalUserProfile,
@@ -18,8 +18,7 @@ type ProfilePageProps = {
   profile: LocalUserProfile;
   runtime: AgentRuntimeState;
   usage: CodexUsageSnapshot;
-  tasks: XiaoTaskDocument[];
-  repositoryCount: number;
+  contributions: XiaoContributionSummary;
   onClose: () => void;
   onSaveProfile: (profile: LocalUserProfile) => void;
 };
@@ -105,8 +104,7 @@ export function ProfilePage({
   profile,
   runtime,
   usage,
-  tasks,
-  repositoryCount,
+  contributions,
   onClose,
   onSaveProfile,
 }: ProfilePageProps) {
@@ -145,18 +143,6 @@ export function ProfilePage({
   const peakDay = activityUsage.days.reduce<(typeof activityUsage.days)[number] | null>(
     (peak, day) => !peak || day.totalTokens > peak.totalTokens ? day : peak,
     null,
-  );
-  const contributions = tasks.reduce(
-    (total, task) => {
-      const completed = task.timeline.some((entry) => entry.kind === "result" && entry.title === "Agent response" && entry.status !== "active");
-      if (completed) total.tasksCompleted += 1;
-      for (const entry of task.timeline) {
-        if (entry.kind === "command") total.commands += 1;
-        if (entry.kind === "change") total.filesModified += entry.files?.length ?? 0;
-      }
-      return total;
-    },
-    { tasksCompleted: 0, filesModified: 0, commands: 0 },
   );
 
   const openEditor = () => {
@@ -329,9 +315,9 @@ export function ProfilePage({
 
           <div className="profile-contribution-grid">
             <article><span><XiaoIcon name="check" size={16} /></span><strong>{fullNumber.format(contributions.tasksCompleted)}</strong><small>Tasks completed</small></article>
-            <article><span><XiaoIcon name="branch" size={16} /></span><strong>{fullNumber.format(repositoryCount)}</strong><small>Repos reviewed</small></article>
+            <article><span><XiaoIcon name="branch" size={16} /></span><strong>{fullNumber.format(contributions.repositoriesReviewed)}</strong><small>Repos reviewed</small></article>
             <article><span><XiaoIcon name="mutation" size={16} /></span><strong>{fullNumber.format(contributions.filesModified)}</strong><small>Files modified</small></article>
-            <article><span><XiaoIcon name="command" size={16} /></span><strong>{fullNumber.format(contributions.commands)}</strong><small>Commands executed</small></article>
+            <article><span><XiaoIcon name="command" size={16} /></span><strong>{fullNumber.format(contributions.terminalCommandsExecuted)}</strong><small>Commands executed</small></article>
           </div>
 
           <footer className="profile-ledger__note">

@@ -19,9 +19,9 @@ use crate::execution::models::{
 };
 
 use super::models::{
-    XiaoLegacyStore, XiaoProjectSummary, XiaoTaskDocument, XiaoThreadBinding,
-    XiaoThreadPersistence, XiaoTimelinePage, XiaoWorkspaceDocument, XiaoWorkspaceMode,
-    XiaoWorkspaceUpdate, XIAO_DATABASE_SCHEMA_VERSION, XIAO_SCHEMA_VERSION,
+    XiaoContributionSummary, XiaoLegacyStore, XiaoProjectSummary, XiaoTaskDocument,
+    XiaoThreadBinding, XiaoThreadPersistence, XiaoTimelinePage, XiaoWorkspaceDocument,
+    XiaoWorkspaceMode, XiaoWorkspaceUpdate, XIAO_DATABASE_SCHEMA_VERSION, XIAO_SCHEMA_VERSION,
 };
 
 const DATABASE_FILE_NAME: &str = "xiao-state.sqlite3";
@@ -456,6 +456,10 @@ impl XiaoRepository {
 
     pub fn list_projects(&self) -> Result<Vec<XiaoProjectSummary>, String> {
         self.with_connection(list_projects_from_connection)
+    }
+
+    pub fn contribution_summary(&self) -> Result<XiaoContributionSummary, String> {
+        self.with_connection(contribution_summary_from_connection)
     }
 
     pub(crate) fn app_data_dir(&self) -> PathBuf {
@@ -2081,6 +2085,66 @@ fn list_projects_from_connection(
     .collect()
 }
 
+fn contribution_summary_from_connection(
+    connection: &mut Connection,
+) -> Result<XiaoContributionSummary, String> {
+    let mut statement = connection
+        .prepare(
+            r#"SELECT workspace_id, task_id, entry_json
+               FROM task_timeline_entries
+               ORDER BY workspace_id, task_id, position"#,
+        )
+        .map_err(|error| format!("Could not prepare Xiao contribution summary: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| format!("Could not query Xiao contribution summary: {error}"))?;
+
+    let mut completed_tasks = HashSet::new();
+    let mut reviewed_repositories = HashSet::new();
+    let mut files_modified = 0usize;
+    let mut terminal_commands_executed = 0usize;
+    for row in rows {
+        let (workspace_id, task_id, entry_json) =
+            row.map_err(|error| format!("Could not decode Xiao contribution row: {error}"))?;
+        let entry: serde_json::Value = serde_json::from_str(&entry_json)
+            .map_err(|error| format!("Could not decode Xiao contribution event: {error}"))?;
+        match entry.get("kind").and_then(serde_json::Value::as_str) {
+            Some("command") => terminal_commands_executed += 1,
+            Some("change") => {
+                files_modified += entry
+                    .get("files")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len);
+            }
+            Some("result")
+                if entry.get("title").and_then(serde_json::Value::as_str)
+                    == Some("Agent response")
+                    && !matches!(
+                        entry.get("status").and_then(serde_json::Value::as_str),
+                        Some("active" | "error")
+                    ) =>
+            {
+                completed_tasks.insert((workspace_id.clone(), task_id));
+                reviewed_repositories.insert(workspace_id);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(XiaoContributionSummary {
+        tasks_completed: completed_tasks.len(),
+        repositories_reviewed: reviewed_repositories.len(),
+        files_modified,
+        terminal_commands_executed,
+    })
+}
+
 fn ensure_local_environment(
     connection: &Connection,
     workspace_id: i64,
@@ -2888,6 +2952,41 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn contribution_summary_aggregates_all_local_workspaces() {
+        let directory = TestDirectory::new("contribution-summary");
+        let first_workspace = directory.workspace("first");
+        let second_workspace = directory.workspace("second");
+        let repository = XiaoRepository::open(&directory.path).unwrap();
+
+        let mut first_task = task("first-task", 0);
+        first_task.timeline = vec![
+            serde_json::json!({ "id": "command", "kind": "command" }),
+            serde_json::json!({ "id": "change", "kind": "change", "files": [{ "path": "one.rs" }, { "path": "two.rs" }] }),
+            serde_json::json!({ "id": "result", "kind": "result", "title": "Agent response", "status": "complete" }),
+        ];
+        first_task.timeline_entry_count = first_task.timeline.len();
+        repository
+            .save_workspace(update(document(&first_workspace, vec![first_task])))
+            .unwrap();
+
+        let mut second_task = task("second-task", 0);
+        second_task.timeline = vec![
+            serde_json::json!({ "id": "command", "kind": "command" }),
+            serde_json::json!({ "id": "result", "kind": "result", "title": "Agent response", "status": "complete" }),
+        ];
+        second_task.timeline_entry_count = second_task.timeline.len();
+        repository
+            .save_workspace(update(document(&second_workspace, vec![second_task])))
+            .unwrap();
+
+        let summary = repository.contribution_summary().unwrap();
+        assert_eq!(summary.tasks_completed, 2);
+        assert_eq!(summary.repositories_reviewed, 2);
+        assert_eq!(summary.files_modified, 2);
+        assert_eq!(summary.terminal_commands_executed, 2);
     }
 
     #[test]

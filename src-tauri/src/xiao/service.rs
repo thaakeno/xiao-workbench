@@ -5,7 +5,8 @@ use std::process::Command;
 use std::os::windows::process::CommandExt;
 
 use super::models::{
-    XiaoProjectSummary, XiaoTimelinePage, XiaoWorkspaceDocument, XiaoWorkspaceUpdate,
+    XiaoContributionSummary, XiaoProjectSummary, XiaoTimelinePage, XiaoWorkspaceDocument,
+    XiaoWorkspaceUpdate,
 };
 use super::repository::XiaoRepository;
 
@@ -36,6 +37,12 @@ pub fn save_workspace(
 
 pub fn list_projects(repository: &XiaoRepository) -> Result<Vec<XiaoProjectSummary>, String> {
     repository.list_projects()
+}
+
+pub fn contribution_summary(
+    repository: &XiaoRepository,
+) -> Result<XiaoContributionSummary, String> {
+    repository.contribution_summary()
 }
 
 pub fn open_project(path: &str) -> Result<(), String> {

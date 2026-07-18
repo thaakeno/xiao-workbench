@@ -146,6 +146,15 @@ pub struct XiaoProjectSummary {
     pub task_count: usize,
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XiaoContributionSummary {
+    pub tasks_completed: usize,
+    pub repositories_reviewed: usize,
+    pub files_modified: usize,
+    pub terminal_commands_executed: usize,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct XiaoLegacyStore {

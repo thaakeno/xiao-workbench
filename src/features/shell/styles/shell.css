@@ -1650,10 +1650,21 @@
 .usage-dialog__activity h3 { margin: 2px 0 0; color: var(--text); font-size: 16px; }
 .usage-dialog__activity header small { color: var(--muted); font-size: var(--text-micro); }
 .usage-dialog__activity header small b { color: var(--text-soft); font-weight: 620; }
-.usage-dialog__heatmap { display: grid; grid-template-columns: repeat(30, minmax(5px, 1fr)); gap: 4px; }
-.usage-dialog__heatmap button { position: relative; aspect-ratio: 1; min-width: 0; border: 1px solid color-mix(in srgb, var(--line) 68%, transparent); border-radius: 3px; background: color-mix(in srgb, var(--accent) calc(var(--usage-level) * 82%), var(--surface-strong)); transition: transform 130ms ease, border-color 130ms ease, filter 130ms ease; }
-.usage-dialog__heatmap button:hover,
-.usage-dialog__heatmap button:focus-visible { z-index: 2; border-color: color-mix(in srgb, var(--accent) 72%, var(--line)); filter: brightness(1.15); transform: translateY(-2px) scale(1.08); outline: none; }
+.usage-dialog__token-flow { display: grid; gap: 12px; }
+.usage-dialog__token-flow > div { display: flex; height: 11px; overflow: hidden; border-radius: 999px; background: var(--surface-strong); }
+.usage-dialog__token-flow > div > i { display: block; min-width: 2px; transition: width 260ms ease; }
+.usage-dialog__token-flow .is-input { --flow-color: #55a878; }
+.usage-dialog__token-flow .is-cache { --flow-color: #d0a04d; }
+.usage-dialog__token-flow .is-output { --flow-color: #d57845; }
+.usage-dialog__token-flow .is-reasoning { --flow-color: #8f75dc; }
+.usage-dialog__token-flow > div > i,
+.usage-dialog__token-flow li > i { background: var(--flow-color); }
+.usage-dialog__token-flow ul { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.usage-dialog__token-flow li { display: grid; min-width: 0; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-deep); }
+.usage-dialog__token-flow li > i { width: 7px; height: 7px; border-radius: 50%; }
+.usage-dialog__token-flow li > span { overflow: hidden; color: var(--muted); font-size: var(--text-micro); text-overflow: ellipsis; white-space: nowrap; }
+.usage-dialog__token-flow li > strong { color: var(--text-soft); font-size: var(--text-micro); font-variant-numeric: tabular-nums; }
+.usage-dialog__token-flow li > small { grid-column: 2 / -1; color: var(--muted); font-size: 9px; }
 .usage-dialog__trend { display: grid; height: 108px; grid-template-columns: repeat(30, minmax(0, 1fr)); gap: 3px; margin-top: 18px; padding-top: 2px; border-bottom: 1px solid var(--line); }
 .usage-dialog__trend > button { position: relative; display: grid; min-width: 0; height: 100%; grid-template-rows: minmax(0, 1fr) 18px; background: transparent; }
 .usage-dialog__trend > button > i { display: flex; min-width: 0; align-items: end; }
@@ -1672,14 +1683,16 @@
 .usage-dialog__rows > article { min-width: 0; grid-template-columns: 28px minmax(0, 1fr) minmax(72px, auto); transition: background 120ms ease; }
 .usage-dialog__rows > article:hover { background: var(--surface-hover); }
 .usage-dialog__tokens { max-width: 118px; }
+.usage-dialog__ranking-more { display: flex; width: 100%; min-height: 38px; align-items: center; justify-content: center; border-top: 1px solid var(--line); color: var(--muted-strong); font-size: var(--text-micro); }
+.usage-dialog__ranking-more:hover { background: var(--surface-hover); color: var(--text); }
 
 @media (max-width: 760px) {
   .usage-dialog__overview { grid-template-columns: 1fr 1fr; }
   .usage-dialog__quick-stats { grid-column: 1 / -1; border-top: 1px solid var(--line); border-left: 0; }
   .usage-dialog__filters small { display: none; }
-  .usage-dialog__heatmap { grid-template-columns: repeat(15, minmax(5px, 1fr)); }
   .usage-dialog__reset-center { grid-template-columns: 1fr; }
   .usage-dialog__reset-center > div + div { border-top: 1px solid var(--line); border-left: 0; }
+  .usage-dialog__token-flow ul { grid-template-columns: 1fr 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

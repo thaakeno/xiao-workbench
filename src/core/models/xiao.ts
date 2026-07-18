@@ -61,6 +61,13 @@ export type XiaoProjectSummary = {
   pinned?: boolean;
 };
 
+export type XiaoContributionSummary = {
+  tasksCompleted: number;
+  repositoriesReviewed: number;
+  filesModified: number;
+  terminalCommandsExecuted: number;
+};
+
 export type XiaoWorkspaceDocument = {
   schemaVersion: 1;
   workspacePath: string;

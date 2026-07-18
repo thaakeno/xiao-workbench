@@ -99,10 +99,14 @@ export function TaskHeader({
           className={`task-header__runtime task-header__runtime--${runtime.phase}`}
           role="status"
           aria-live="polite"
-          title={runtime.error ?? (cliVersion ? `Codex CLI ${cliVersion} · local app-server connected` : "Local Codex app-server connected")}
         >
           <i />
           {runtimeLabel}
+          <span className="task-header__runtime-tooltip" role="tooltip">
+            <span><XiaoIcon name="runtime" size={15} /></span>
+            <strong>{cliVersion ? `Codex CLI ${cliVersion}` : "Codex CLI version unavailable"}</strong>
+            <small>{runtime.error ?? "Local app-server connected"}</small>
+          </span>
         </span>
         <button
           className="task-header__context"

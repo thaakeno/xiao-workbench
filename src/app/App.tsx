@@ -16,6 +16,7 @@ import type {
 } from "../core/models/agent";
 import type { RoutineOpenRunTarget, RoutineSummary } from "../core/models/routine";
 import type {
+  XiaoContributionSummary,
   XiaoProjectSummary,
   XiaoWorkspaceDocument,
   XiaoWorkspaceMode,
@@ -97,6 +98,7 @@ const codexThreadSnapshotStorageKey = "xiao.codex-thread-snapshot.v1";
 const usageSnapshotStorageKey = "xiao.usage-snapshot.v1";
 const rateLimitsSnapshotStorageKey = "xiao.rate-limits-snapshot.v1";
 const changeSummarySnapshotStorageKey = "xiao.thread-change-summaries.v1";
+const contributionSnapshotStorageKey = "xiao.contribution-snapshot.v1";
 const projectPathKey = (path: string) => path.replace(/[\\/]+$/, "").toLocaleLowerCase();
 const isGeneratedCodexWorkspace = (path: string) =>
   /\/documents\/codex\/\d{4}-\d{2}-\d{2}(?:\/|$)/i.test(path.replaceAll("\\", "/"));
@@ -746,6 +748,14 @@ export function App() {
   const [rateLimits, setRateLimits] = useState<AgentRateLimits | null>(() =>
     readSnapshot(rateLimitsSnapshotStorageKey, null),
   );
+  const [contributions, setContributions] = useState<XiaoContributionSummary>(() =>
+    readSnapshot(contributionSnapshotStorageKey, {
+      tasksCompleted: 0,
+      repositoriesReviewed: 0,
+      filesModified: 0,
+      terminalCommandsExecuted: 0,
+    }),
+  );
   const prefetchedCodexThreadsRef = useRef(new Set<string>());
   const [threadChangeSummaries, setThreadChangeSummaries] = useState<
     Record<string, ThreadChangeSummary | null>
@@ -1011,6 +1021,17 @@ export function App() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [preferences.importCodexHistory]);
+
+  useEffect(() => {
+    if (activePage !== "profile" || !isTauriHost()) return;
+    let cancelled = false;
+    void nativeBridge.readXiaoContributionSummary().then((summary) => {
+      if (cancelled) return;
+      setContributions(summary);
+      writeSnapshot(contributionSnapshotStorageKey, summary);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activePage]);
 
   useEffect(() => {
     if (!hydrationPath || nativeWorkspaceLoadedRef.current.has(hydrationPath)) return;
@@ -2363,6 +2384,19 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activePage, activeTaskId, draftTask.id, draftTabOpen, openTaskIds]);
 
+  const selectedThreadId = activeTask.threadBinding?.threadId ?? activeTask.threadId ?? null;
+  const savedThreadUsage = selectedThreadId
+    ? threadTokenUsage.find((item) => item.threadId === selectedThreadId) ?? null
+    : null;
+  const selectedContextWindow = visibleModels.find((model) => model.model === activeTask.model)?.contextWindow
+    ?? visibleModels.find((model) => model.isDefault)?.contextWindow
+    ?? null;
+  const activeContextUsage = agent.contextUsage ?? (savedThreadUsage ? {
+    total: savedThreadUsage,
+    last: savedThreadUsage,
+    modelContextWindow: selectedContextWindow,
+  } : null);
+
   return (
     <>
       <GlobalContextMenu />
@@ -2521,8 +2555,7 @@ export function App() {
               profile={profile}
               runtime={agent.runtime}
               usage={agent.usage}
-              tasks={tasks}
-              repositoryCount={projects.filter((project) => project.taskCount > 0).length}
+              contributions={contributions}
               onClose={() => setActivePage("tasks")}
               onSaveProfile={saveProfile}
             />
@@ -2563,7 +2596,7 @@ export function App() {
               hasThread={agent.hasThread}
               canUndo={agent.canUndo && activeTask.followUps.length === 0}
               undoing={agent.undoing}
-              contextUsage={agent.contextUsage}
+              contextUsage={activeContextUsage}
               showReasoningSummaries={preferences.showReasoningSummaries}
               expandToolOutput={preferences.expandToolOutput}
               showChatExport={preferences.showChatExport}
@@ -2663,7 +2696,7 @@ export function App() {
               executionTransitioning={activeEnvironmentBusy}
               timeline={agent.timeline}
               models={agent.models}
-              contextUsage={agent.contextUsage}
+              contextUsage={activeContextUsage}
               plan={activeTask.plan}
               runtimeLogs={agent.runtimeLogs}
               loading={loading || activeEnvironmentBusy}

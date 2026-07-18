@@ -1560,6 +1560,10 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: linear-gradient(135deg, color-mix(in srgb, #7652d8 7%, var(--surface-raised)), var(--surface-raised) 58%);
 }
 
 .context-panel__hero > div:first-child { min-width: 0; }
@@ -1568,6 +1572,11 @@
 .context-messages > header span { color: var(--muted); font-size: var(--text-caption); }
 .context-panel__hero h2 { margin: 5px 0 0; overflow: hidden; color: var(--text); font-size: 18px; font-weight: 610; letter-spacing: -0.025em; text-overflow: ellipsis; white-space: nowrap; }
 .context-panel__hero p { margin: 7px 0 0; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
+.context-panel__eyebrow { font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+.context-panel__signal { display: inline-flex; min-height: 24px; align-items: center; gap: 6px; margin-top: 10px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-deep); color: var(--muted); font-size: var(--text-micro) !important; }
+.context-panel__signal > i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+.context-panel__signal.is-live { color: var(--success); }
+.context-panel__signal.is-live > i { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
 
 .context-panel__meter {
   display: grid;
@@ -1586,24 +1595,27 @@
 .context-facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 24px;
-  border-top: 1px solid var(--line);
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .context-facts > div {
   display: grid;
   min-width: 0;
   gap: 5px;
-  padding: 14px 12px 14px 0;
-  border-bottom: 1px solid var(--line);
+  min-height: 66px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
 }
 
-.context-facts > div:nth-child(even) { padding-right: 0; padding-left: 12px; }
+.context-facts > div:nth-child(even) { padding-right: 12px; padding-left: 12px; }
 .context-facts span { color: var(--muted); font-size: var(--text-caption); }
 .context-facts strong { overflow: hidden; color: var(--text-soft); font-size: var(--text-label); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 
 .context-breakdown,
-.context-messages { margin-top: 30px; }
+.context-messages { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); }
 .context-breakdown > header,
 .context-messages > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .context-breakdown h3,

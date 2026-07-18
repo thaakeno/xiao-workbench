@@ -224,6 +224,7 @@
 }
 
 .task-header__runtime {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -293,6 +294,50 @@
   overscroll-behavior-y: contain;
   overflow-anchor: none;
 }
+
+.task-header__runtime-tooltip {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 10px);
+  right: -8px;
+  display: grid;
+  width: max-content;
+  max-width: 280px;
+  min-width: 210px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 1px 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+  box-shadow: var(--shadow-panel);
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px) scale(.985);
+  transform-origin: top right;
+  transition: opacity 130ms ease, transform 130ms ease;
+}
+
+.task-header__runtime-tooltip::before {
+  position: absolute;
+  top: -5px;
+  right: 20px;
+  width: 8px;
+  height: 8px;
+  border-top: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.task-header__runtime:hover .task-header__runtime-tooltip,
+.task-header__runtime:focus-within .task-header__runtime-tooltip { opacity: 1; transform: translateY(0) scale(1); }
+.task-header__runtime-tooltip > span { display: grid; width: 30px; height: 30px; grid-row: 1 / 3; place-items: center; border-radius: 8px; background: var(--success-soft); color: var(--success); }
+.task-header__runtime-tooltip > strong { overflow: hidden; color: var(--text); font-family: var(--font-mono); font-size: var(--text-micro); font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.task-header__runtime-tooltip > small { color: var(--muted); font-size: 10px; }
 
 .timeline {
   width: min(100%, 760px);
@@ -730,7 +775,7 @@
 }
 
 .exploration-group {
-  margin: 2px 0 7px;
+  margin: 4px 0 11px;
   color: var(--muted);
   font-size: var(--text-label);
 }
@@ -741,9 +786,9 @@
   min-height: 29px;
   align-items: center;
   gap: 7px;
-  margin-left: -3px;
-  padding: 2px 3px;
-  border-radius: 7px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   list-style: none;
   cursor: pointer;
 }
@@ -795,9 +840,12 @@
 .exploration-group__items {
   display: grid;
   gap: 2px;
-  margin: 4px 0 12px 25px;
-  padding-left: 10px;
-  border-left: 1px solid var(--line);
+  margin: 0 0 12px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
+  background: color-mix(in srgb, var(--surface-deep) 72%, transparent);
 }
 
 .exploration-group__item {
@@ -1113,6 +1161,10 @@
 .activity__body {
   min-width: 0;
   margin-bottom: 28px;
+  padding: 11px 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-raised) 82%, transparent);
 }
 
 .activity__body > header {
@@ -1356,6 +1408,8 @@
   cursor: pointer;
   transition: background 130ms ease, color 130ms ease;
 }
+
+.exploration-group > details[open] > summary { border-color: var(--line); border-radius: 9px 9px 0 0; background: var(--surface-deep); }
 
 .activity--reasoning details > summary::-webkit-details-marker { display: none; }
 .activity--reasoning details > summary:hover,

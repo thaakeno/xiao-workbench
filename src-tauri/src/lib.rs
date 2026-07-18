@@ -43,7 +43,7 @@ use terminal::runtime::TerminalManager;
 use workspace::commands::{get_workspace_snapshot, list_workspace_files, read_workspace_file};
 use xiao::commands::{
     list_xiao_projects, load_xiao_timeline_page, load_xiao_workspace, open_xiao_project,
-    save_xiao_workspace,
+    read_xiao_contribution_summary, save_xiao_workspace,
 };
 use xiao::repository::XiaoRepository;
 
@@ -156,6 +156,7 @@ pub fn run() {
             load_xiao_timeline_page,
             save_xiao_workspace,
             list_xiao_projects,
+            read_xiao_contribution_summary,
             open_xiao_project,
         ])
         .run(tauri::generate_context!())
