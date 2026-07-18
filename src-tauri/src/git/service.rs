@@ -298,6 +298,17 @@ fn display_path(path: &Path) -> String {
     value
 }
 
+fn git_process_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        return PathBuf::from(display_path(path));
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
 fn tracked_patch(repository_root: &Path, path: &str) -> (String, bool, usize, usize) {
     let arguments = ["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", path];
     let patch = run_git(repository_root, &arguments)
@@ -390,7 +401,7 @@ fn count_patch_lines(patch: &str) -> (usize, usize) {
 
 fn run_git(root: &Path, arguments: &[&str]) -> Option<String> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(root).args(arguments);
+    command.arg("-C").arg(git_process_path(root)).args(arguments);
     hide_window(&mut command);
 
     let output = command.output().ok()?;
@@ -1059,7 +1070,7 @@ fn run_git_checked(root: &Path, arguments: &[String]) -> Result<String, String> 
 
 fn run_git_bytes_checked(root: &Path, arguments: &[String]) -> Result<Vec<u8>, String> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(root).args(arguments);
+    command.arg("-C").arg(git_process_path(root)).args(arguments);
     hide_window(&mut command);
     let output = command.output().map_err(|error| error.to_string())?;
     if output.status.success() {
@@ -1078,7 +1089,7 @@ fn run_git_with_index(
     let mut command = Command::new("git");
     command
         .arg("-C")
-        .arg(root)
+        .arg(git_process_path(root))
         .args(arguments)
         .env("GIT_INDEX_FILE", index);
     hide_window(&mut command);
@@ -1124,12 +1135,25 @@ fn hide_window(_command: &mut Command) {}
 mod tests {
     use super::{
         apply_workspace_patch, create_workspace_checkpoint, discard_workspace_checkpoint,
-        finish_workspace_checkpoint, list_branches, read_git_comparison, read_git_summary,
-        run_git_action,
+        finish_workspace_checkpoint, git_process_path, list_branches, read_git_comparison,
+        read_git_summary, run_git_action,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+
+    #[cfg(windows)]
+    #[test]
+    fn git_process_paths_remove_windows_verbatim_prefixes() {
+        assert_eq!(
+            git_process_path(Path::new(r"\\?\C:\workspace\repo")),
+            PathBuf::from(r"C:\workspace\repo"),
+        );
+        assert_eq!(
+            git_process_path(Path::new(r"\\?\UNC\server\share\repo")),
+            PathBuf::from(r"\\server\share\repo"),
+        );
+    }
 
     #[test]
     fn workspace_inside_a_parent_repository_is_scoped_to_the_workspace() {
