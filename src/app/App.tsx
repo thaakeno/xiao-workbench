@@ -50,6 +50,12 @@ import { GlobalContextMenu } from "../features/shell/components/GlobalContextMen
 import { Sidebar } from "../features/shell/components/Sidebar";
 import { TitleBar } from "../features/shell/components/TitleBar";
 import type { AppPage } from "../features/shell/shell.types";
+import {
+  readStartupProjects,
+  readStartupTaskState,
+  writeStartupProjects,
+  writeStartupTaskState,
+} from "../features/startup/startupCache";
 import { managedWorktreeCleanupMessage } from "../features/task/taskEnvironment";
 import { forkTaskFromEntry } from "../features/task/taskFork";
 import {
@@ -589,7 +595,13 @@ export function App() {
   const { theme, setTheme } = useTheme();
   const { preferences, updatePreferences, updateTaskRunDefaults } = useAppPreferences();
   const codexUpdate = useCodexUpdate();
-  const [initialTaskState] = useState(defaultTaskState);
+  const [startupTaskCache] = useState(() => {
+    const state = readStartupTaskState(activeProjectPath);
+    return state && activeProjectPath ? { path: activeProjectPath, state } : null;
+  });
+  const [initialTaskState] = useState<StoredTaskState>(
+    () => startupTaskCache?.state ?? defaultTaskState(),
+  );
   const [activePage, setActivePage] = useState<AppPage>("tasks");
   const [focusView, setFocusView] = useState<FocusView>("changes");
   const [focusPanelOpen, setFocusPanelOpen] = useState(false);
@@ -597,8 +609,9 @@ export function App() {
     () => !window.matchMedia("(max-width: 760px)").matches,
   );
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
-  const [taskWorkspacePath, setTaskWorkspacePath] = useState("");
-  const [taskStateReady, setTaskStateReady] = useState(!isTauriHost());
+  const [taskWorkspacePath, setTaskWorkspacePath] = useState(startupTaskCache?.path ?? "");
+  const [taskStateReady, setTaskStateReady] = useState(Boolean(startupTaskCache) || !isTauriHost());
+  const [startupComplete, setStartupComplete] = useState(Boolean(startupTaskCache));
   const [taskLoadError, setTaskLoadError] = useState<string | null>(null);
   const [taskHistoryError, setTaskHistoryError] = useState<string | null>(null);
   const [taskSaveError, setTaskSaveError] = useState<string | null>(null);
@@ -620,12 +633,13 @@ export function App() {
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const persistedWorkspaceSnapshotsRef = useRef(new Map<string, PersistedWorkspaceSnapshot>());
   const latestTaskStateRef = useRef<{ path: string; state: StoredTaskState } | null>(null);
+  const nativeWorkspaceLoadedRef = useRef(new Set<string>());
   const focusedLaunchTaskRef = useRef<string | null>(null);
   const notifiedRuntimeErrorRef = useRef<string | null>(null);
   const notifiedApprovalRef = useRef<string | null>(null);
   const notifiedQuestionRef = useRef<string | null>(null);
   const [projects, setProjects] = useState<XiaoProjectSummary[]>(() =>
-    readSnapshot(projectSnapshotStorageKey, []),
+    applyProjectPreferences(readStartupProjects(), readProjectPreferences()),
   );
   const managedProjectPathsRef = useRef(new Set<string>());
   const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>(() =>
@@ -703,7 +717,6 @@ export function App() {
     const taskKey = `${workspace.path}\u0000${activeTask.id}`;
     if (focusedLaunchTaskRef.current === taskKey) return;
     focusedLaunchTaskRef.current = taskKey;
-    setSidebarOpen(false);
     setFocusPanelOpen(false);
   }, [activeTask.id, focusedLaunch, preferences.focusNewTasks, workspace.path]);
 
@@ -812,27 +825,27 @@ export function App() {
     void nativeBridge
       .listXiaoProjects()
       .then((items) => {
-        const visibleItems = items.filter((project) =>
-          project.taskCount == null || project.taskCount > 0 ||
+        const visible = items.filter((project) =>
+          project.taskCount > 0 ||
           sameWorkspacePath(project.path, activeProjectPath ?? ""),
         );
-        visibleItems.forEach((project) =>
+        visible.forEach((project) =>
           managedProjectPathsRef.current.add(projectPathKey(project.path)),
         );
         setProjects((current) => {
           const next = applyProjectPreferences(
-            current.reduce((merged, project) => mergeProject(merged, project), visibleItems),
+            current.reduce((merged, project) => mergeProject(merged, project), visible),
             projectPreferencesRef.current,
           );
-          writeSnapshot(projectSnapshotStorageKey, next);
+          writeStartupProjects(next);
           return next;
         });
       })
       .catch(() => undefined);
-  }, []);
+  }, [activeProjectPath]);
 
   useEffect(() => {
-    if (loading || taskWorkspacePath === workspace.path) return;
+    if (loading || nativeWorkspaceLoadedRef.current.has(workspace.path)) return;
     let cancelled = false;
     setTaskStateReady(false);
     setTaskLoadError(null);
@@ -861,6 +874,7 @@ export function App() {
           );
         }
         if (cancelled) return;
+        nativeWorkspaceLoadedRef.current.add(workspace.path);
         const pendingThreadId = pendingCodexThreadRef.current;
         const pendingTaskId = pendingThreadId ? `codex:${pendingThreadId}` : null;
         setTasks(nextState.tasks);
@@ -881,21 +895,23 @@ export function App() {
         setSendingFollowUpId(null);
         setFailedFollowUpId(null);
         setTaskStateReady(true);
-        if (managedProjectPathsRef.current.has(projectPathKey(workspace.path))) {
-          setProjects((current) =>
-            applyProjectPreferences(
-              mergeProject(current, {
+        writeStartupTaskState(workspace.path, nextState);
+        setProjects((current) => {
+          const next = applyProjectPreferences(
+            mergeProject(current, {
               path: workspace.path,
               name: workspace.name,
               updatedAt:
                 Math.max(0, ...nextState.tasks.map((task) => task.updatedAt)) ||
                 current.find((project) => project.path === workspace.path)?.updatedAt ||
                 Date.now(),
-              }),
-              projectPreferencesRef.current,
-            ),
+              taskCount: nextState.tasks.length,
+            }),
+            projectPreferencesRef.current,
           );
-        }
+          writeStartupProjects(next);
+          return next;
+        });
       } catch (reason) {
         if (cancelled) return;
         setTasks([]);
@@ -914,6 +930,10 @@ export function App() {
       cancelled = true;
     };
   }, [codexThreads, loading, preferences.importCodexHistory, taskWorkspacePath, workspace.name, workspace.path]);
+
+  useEffect(() => {
+    if (!startupComplete && taskStateReady && !loading) setStartupComplete(true);
+  }, [loading, startupComplete, taskStateReady]);
 
   useEffect(() => {
     setTaskHistoryError(null);
@@ -968,6 +988,7 @@ export function App() {
     if (!taskStateReady || workspace.path !== taskWorkspacePath) return;
     const state = { tasks, activeTaskId, showArchived: false };
     latestTaskStateRef.current = { path: workspace.path, state };
+    writeStartupTaskState(workspace.path, state);
     const timer = window.setTimeout(() => {
       void persistTaskState(workspace.path, state).catch(() => undefined);
     }, 250);
@@ -2133,7 +2154,7 @@ export function App() {
     writeProjectPreferences(nextPreferences);
     setProjects((current) =>
       applyProjectPreferences(
-        mergeProject(current, { path: selected, name, updatedAt: Date.now() }),
+        mergeProject(current, { path: selected, name, updatedAt: Date.now(), taskCount: 0 }),
         nextPreferences,
       ),
     );
@@ -2181,6 +2202,12 @@ export function App() {
   return (
     <>
       <GlobalContextMenu />
+      {!startupComplete ? (
+        <div className="startup-gate" role="status" aria-label="Loading Xiao Workbench">
+          <span className="startup-gate__mark"><img src="/xiao-mark.png" alt="" /></span>
+          <small>Preparing your workspace</small>
+        </div>
+      ) : null}
       <AppShell
         sidebarOpen={sidebarOpen}
         onCloseSidebar={closeSidebar}

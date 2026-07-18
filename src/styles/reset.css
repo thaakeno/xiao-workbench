@@ -78,6 +78,55 @@ select:focus-visible {
   color: var(--accent-ink);
 }
 
+.startup-gate {
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  background: var(--bg);
+  color: var(--muted);
+  text-align: center;
+}
+
+.startup-gate__mark {
+  position: relative;
+  display: grid;
+  width: 54px;
+  height: 54px;
+  margin: auto;
+  place-items: center;
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.startup-gate__mark::after {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
+  border-top-color: transparent;
+  border-radius: 22px;
+  content: "";
+  animation: startup-orbit 1.2s cubic-bezier(0.55, 0.1, 0.35, 0.9) infinite;
+}
+
+.startup-gate__mark img {
+  width: 30px;
+  height: 30px;
+  animation: startup-breathe 1.2s ease-in-out infinite;
+}
+
+.startup-gate small { font-size: var(--text-caption); }
+
+@keyframes startup-orbit { to { transform: rotate(360deg); } }
+@keyframes startup-breathe { 50% { transform: scale(0.94); opacity: 0.72; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-gate__mark::after,
+  .startup-gate__mark img { animation: none; }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

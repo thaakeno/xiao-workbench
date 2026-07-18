@@ -57,7 +57,7 @@ export type XiaoProjectSummary = {
   path: string;
   name: string;
   updatedAt: number;
-  taskCount?: number;
+  taskCount: number;
   pinned?: boolean;
 };
 
