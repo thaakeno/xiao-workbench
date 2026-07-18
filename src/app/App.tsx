@@ -2072,6 +2072,11 @@ export function App() {
       followUps: [],
       threadId: null,
       threadBinding: null,
+      origin: "xiao",
+      sourceCwd: undefined,
+      historyLoaded: true,
+      historyCursor: null,
+      historyLoadingOlder: false,
       executionEnvironmentId: null,
       workspaceMode: "local",
       managedWorktreeId: null,
@@ -2396,6 +2401,9 @@ export function App() {
     last: savedThreadUsage,
     modelContextWindow: selectedContextWindow,
   } : null);
+  const displayRuntime = activeTask.origin === "codex" && system.codexVersion
+    ? { ...agent.runtime, phase: "ready" as const, taskId: null, error: null }
+    : agent.runtime;
 
   return (
     <>
@@ -2526,7 +2534,7 @@ export function App() {
               preferences={preferences}
               models={agent.models}
               account={agent.account}
-              runtime={agent.runtime}
+              runtime={displayRuntime}
               system={system}
               codexUpdate={codexUpdate.status}
               codexUpdateResult={codexUpdate.result}
@@ -2553,7 +2561,7 @@ export function App() {
             <ProfilePage
               accountUsage={agent.accountUsage}
               profile={profile}
-              runtime={agent.runtime}
+              runtime={displayRuntime}
               usage={agent.usage}
               contributions={contributions}
               onClose={() => setActivePage("tasks")}
@@ -2570,7 +2578,7 @@ export function App() {
               taskStateError={taskStateError}
               taskStateLoading={activeTaskHistoryLoading}
               timeline={agent.timeline}
-              runtime={agent.runtime}
+              runtime={displayRuntime}
               latestRun={agent.latestRun}
               models={visibleModels}
               selectedModel={activeTask.model}
@@ -2690,7 +2698,7 @@ export function App() {
               onClose={() => setFocusPanelOpen(false)}
               workspace={workspace}
               system={system}
-              runtime={agent.runtime}
+              runtime={displayRuntime}
               task={activeTask}
               executionTaskId={executionTaskId}
               executionTransitioning={activeEnvironmentBusy}

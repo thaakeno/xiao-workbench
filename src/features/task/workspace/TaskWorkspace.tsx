@@ -326,9 +326,13 @@ export function TaskWorkspace({
       onDraftChange={onDraftChange}
       onResolveQuestion={onResolveQuestion}
       disabled={
-        taskArchived || taskStateLoading || environmentBusy || Boolean(taskStateError)
+        taskArchived || taskStateLoading || environmentBusy || Boolean(taskStateError) || taskId.startsWith("codex:")
       }
-      disabledPlaceholder={taskStateLoading ? "Loading task history…" : undefined}
+      disabledPlaceholder={taskStateLoading
+        ? "Loading task history…"
+        : taskId.startsWith("codex:")
+          ? "Imported Codex history · Continue in a Xiao task to send"
+          : undefined}
       storageError={taskStateError}
     />
   );
