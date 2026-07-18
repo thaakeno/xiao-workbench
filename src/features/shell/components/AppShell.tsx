@@ -63,7 +63,11 @@ export function AppShell({
   const [focusRailOverlay, setFocusRailOverlay] = useState(true);
   const [resizingFocusRail, setResizingFocusRail] = useState(false);
   const sidebarResizeStart = useRef({ pointerX: 0, sidebarWidth: defaultSidebarWidth });
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const pendingSidebarWidth = useRef(sidebarWidth);
+  const sidebarResizeFrame = useRef<number | null>(null);
   const focusRailResizeStart = useRef({ pointerX: 0, focusRailWidth: defaultFocusRailWidth });
+  const frameRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
   const clampFocusRailWidth = (width: number) =>
@@ -88,7 +92,12 @@ export function AppShell({
   }, [focusRailWidth, resizingFocusRail]);
 
   useEffect(() => {
-    const keepWidthInViewport = () => setSidebarWidth((width) => clampSidebarWidth(width));
+    const keepWidthInViewport = () => setSidebarWidth((width) => {
+      const next = clampSidebarWidth(width);
+      sidebarWidthRef.current = next;
+      pendingSidebarWidth.current = next;
+      return next;
+    });
     window.addEventListener("resize", keepWidthInViewport);
     return () => window.removeEventListener("resize", keepWidthInViewport);
   }, []);
@@ -108,20 +117,40 @@ export function AppShell({
     if (!resizingSidebar) return;
 
     const resize = (event: PointerEvent) => {
-      setSidebarWidth(
-        clampSidebarWidth(
-          sidebarResizeStart.current.sidebarWidth +
-            event.clientX -
-            sidebarResizeStart.current.pointerX,
-        ),
+      pendingSidebarWidth.current = clampSidebarWidth(
+        sidebarResizeStart.current.sidebarWidth +
+          event.clientX -
+          sidebarResizeStart.current.pointerX,
       );
+      if (sidebarResizeFrame.current !== null) return;
+      sidebarResizeFrame.current = window.requestAnimationFrame(() => {
+        sidebarResizeFrame.current = null;
+        frameRef.current?.style.setProperty(
+          "--sidebar-width",
+          `${pendingSidebarWidth.current}px`,
+        );
+      });
     };
-    const stopResizing = () => setResizingSidebar(false);
+    const stopResizing = () => {
+      if (sidebarResizeFrame.current !== null) {
+        window.cancelAnimationFrame(sidebarResizeFrame.current);
+        sidebarResizeFrame.current = null;
+      }
+      const next = pendingSidebarWidth.current;
+      frameRef.current?.style.setProperty("--sidebar-width", `${next}px`);
+      sidebarWidthRef.current = next;
+      setSidebarWidth(next);
+      setResizingSidebar(false);
+    };
     window.addEventListener("pointermove", resize);
     window.addEventListener("pointerup", stopResizing);
     window.addEventListener("pointercancel", stopResizing);
     window.addEventListener("blur", stopResizing);
     return () => {
+      if (sidebarResizeFrame.current !== null) {
+        window.cancelAnimationFrame(sidebarResizeFrame.current);
+        sidebarResizeFrame.current = null;
+      }
       window.removeEventListener("pointermove", resize);
       window.removeEventListener("pointerup", stopResizing);
       window.removeEventListener("pointercancel", stopResizing);
@@ -177,6 +206,7 @@ export function AppShell({
 
   return (
     <div
+      ref={frameRef}
       className={`app-frame ${resizingSidebar ? "app-frame--resizing-sidebar" : ""} ${
         resizingFocusRail ? "app-frame--resizing-focus-rail" : ""
       }`}
@@ -208,17 +238,29 @@ export function AppShell({
             aria-valuemax={maxSidebarWidth()}
             aria-valuenow={sidebarWidth}
             tabIndex={0}
-            onDoubleClick={() => setSidebarWidth(clampSidebarWidth(defaultSidebarWidth))}
+            onDoubleClick={() => {
+              const next = clampSidebarWidth(defaultSidebarWidth);
+              sidebarWidthRef.current = next;
+              pendingSidebarWidth.current = next;
+              setSidebarWidth(next);
+            }}
             onKeyDown={(event) => {
               if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
               event.preventDefault();
-              setSidebarWidth((width) =>
-                clampSidebarWidth(width + (event.key === "ArrowLeft" ? -10 : 10)),
+              const next = clampSidebarWidth(
+                sidebarWidthRef.current + (event.key === "ArrowLeft" ? -10 : 10),
               );
+              sidebarWidthRef.current = next;
+              pendingSidebarWidth.current = next;
+              setSidebarWidth(next);
             }}
             onPointerDown={(event) => {
               event.preventDefault();
-              sidebarResizeStart.current = { pointerX: event.clientX, sidebarWidth };
+              sidebarResizeStart.current = {
+                pointerX: event.clientX,
+                sidebarWidth: sidebarWidthRef.current,
+              };
+              pendingSidebarWidth.current = sidebarWidthRef.current;
               setResizingSidebar(true);
             }}
           />

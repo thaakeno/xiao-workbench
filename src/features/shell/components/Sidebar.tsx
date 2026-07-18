@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -93,6 +94,12 @@ const sidebarDateFormatter = new Intl.DateTimeFormat(undefined, {
 const sameProjectPath = (left: string, right: string) =>
   left.replace(/[\\/]+$/, "").toLocaleLowerCase() ===
   right.replace(/[\\/]+$/, "").toLocaleLowerCase();
+const monthGroupFormatter = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+const startOfDay = (timestamp: number) => {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+};
 
 const relativeTime = (timestamp: number, now: number) => {
   const elapsed = Math.max(0, now - timestamp);
@@ -103,12 +110,6 @@ const relativeTime = (timestamp: number, now: number) => {
   return sidebarDateFormatter.format(new Date(timestamp));
 };
 
-const monthGroupFormatter = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
-const startOfDay = (timestamp: number) => {
-  const date = new Date(timestamp);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-};
 const groupForTask = (task: WorkbenchTask, activeTaskId: string, now: number) => {
   if (task.id === activeTaskId) return "Active";
   const today = startOfDay(now);
@@ -116,8 +117,7 @@ const groupForTask = (task: WorkbenchTask, activeTaskId: string, now: number) =>
   if (taskDay === today) return "Today";
   if (taskDay === today - 86_400_000) return "Yesterday";
   const todayDate = new Date(today);
-  const mondayOffset = (todayDate.getDay() + 6) % 7;
-  const startOfWeek = today - mondayOffset * 86_400_000;
+  const startOfWeek = today - ((todayDate.getDay() + 6) % 7) * 86_400_000;
   if (taskDay >= startOfWeek) return "This week";
   const taskDate = new Date(task.updatedAt);
   if (taskDate.getFullYear() === todayDate.getFullYear() && taskDate.getMonth() === todayDate.getMonth()) return "Earlier this month";
@@ -184,25 +184,28 @@ export function Sidebar({
   const projectMenuTriggerRef = useRef<HTMLElement | null>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuTriggerRef = useRef<HTMLElement | null>(null);
-  const visibleTasks = [...tasks]
+  const visibleTasks = useMemo(() => [...tasks]
     .filter((task) => !task.archived)
-    .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt);
-  const groupedTaskMap = new Map<string, WorkbenchTask[]>();
-  for (const task of visibleTasks) {
-    const group = groupForTask(task, activeTaskId, now);
-    groupedTaskMap.set(group, [...(groupedTaskMap.get(group) ?? []), task]);
-  }
-  const groupPriority = ["Active", "Today", "Yesterday", "This week", "Earlier this month"];
-  const groupedTasks = [...groupedTaskMap]
-    .map(([group, groupTasks]) => ({ group, tasks: groupTasks }))
-    .sort((left, right) => {
-      const leftIndex = groupPriority.indexOf(left.group);
-      const rightIndex = groupPriority.indexOf(right.group);
-      if (leftIndex < 0 && rightIndex < 0) return right.tasks[0].updatedAt - left.tasks[0].updatedAt;
-      if (leftIndex < 0) return 1;
-      if (rightIndex < 0) return -1;
-      return leftIndex - rightIndex;
-    });
+    .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt),
+  [tasks]);
+  const groupedTasks = useMemo(() => {
+    const groups = new Map<string, WorkbenchTask[]>();
+    for (const task of visibleTasks) {
+      const group = groupForTask(task, activeTaskId, now);
+      groups.set(group, [...(groups.get(group) ?? []), task]);
+    }
+    const priority = ["Active", "Today", "Yesterday", "This week", "Earlier this month"];
+    return [...groups]
+      .map(([group, groupTasks]) => ({ group, tasks: groupTasks }))
+      .sort((left, right) => {
+        const leftIndex = priority.indexOf(left.group);
+        const rightIndex = priority.indexOf(right.group);
+        if (leftIndex < 0 && rightIndex < 0) return right.tasks[0].updatedAt - left.tasks[0].updatedAt;
+        if (leftIndex < 0) return 1;
+        if (rightIndex < 0) return -1;
+       return leftIndex - rightIndex;
+      });
+  }, [activeTaskId, now, visibleTasks]);
   const menuProject = projects.find((project) => project.path === projectMenu?.projectPath);
   const menuTask = tasks.find((task) => task.id === taskMenu?.taskId);
   const workingTasks = new Set(workingTaskIds);

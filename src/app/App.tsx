@@ -634,6 +634,7 @@ export function App() {
   const persistedWorkspaceSnapshotsRef = useRef(new Map<string, PersistedWorkspaceSnapshot>());
   const latestTaskStateRef = useRef<{ path: string; state: StoredTaskState } | null>(null);
   const nativeWorkspaceLoadedRef = useRef(new Set<string>());
+  const openProjectWithoutTaskRef = useRef(false);
   const focusedLaunchTaskRef = useRef<string | null>(null);
   const notifiedRuntimeErrorRef = useRef<string | null>(null);
   const notifiedApprovalRef = useRef<string | null>(null);
@@ -654,7 +655,6 @@ export function App() {
   const codexHistoryRefreshRef = useRef(0);
   const loadingCodexThreadsRef = useRef(new Set<string>());
   const pendingCodexThreadRef = useRef<string | null>(null);
-  const openProjectWithoutTaskRef = useRef(false);
   const [archivedTasks, setArchivedTasks] = useState<ArchivedTaskItem[]>([]);
   const [archivedTasksLoading, setArchivedTasksLoading] = useState(false);
   const [archivedTasksError, setArchivedTasksError] = useState<string | null>(null);
@@ -874,11 +874,13 @@ export function App() {
           );
         }
         if (cancelled) return;
+        const openWithoutTask = openProjectWithoutTaskRef.current;
+        openProjectWithoutTaskRef.current = false;
         nativeWorkspaceLoadedRef.current.add(workspace.path);
         const pendingThreadId = pendingCodexThreadRef.current;
         const pendingTaskId = pendingThreadId ? `codex:${pendingThreadId}` : null;
         setTasks(nextState.tasks);
-        setActiveTaskId(openProjectWithoutTaskRef.current ? null :
+        setActiveTaskId(openWithoutTask ? null :
           pendingTaskId && nextState.tasks.some((task) => task.id === pendingTaskId)
             ? pendingTaskId
             : nextState.activeTaskId,
@@ -1934,6 +1936,21 @@ export function App() {
     setProjects((current) => applyProjectPreferences(current, nextPreferences));
   };
 
+  const selectProject = (path: string) => {
+    const cached = readStartupTaskState(path);
+    openProjectWithoutTaskRef.current = true;
+    setTasks(cached?.tasks ?? []);
+    setActiveTaskId(null);
+    setOpenTaskIds([]);
+    setDraftTask(createDraftTask(preferences.taskRunDefaults));
+    setDraftTabOpen(true);
+    setTaskWorkspacePath(cached ? path : "");
+    setTaskStateReady(Boolean(cached) || !isTauriHost());
+    setActiveProjectPath(path);
+    setActivePage("tasks");
+    setFocusPanelOpen(false);
+  };
+
   const toggleProjectPinned = (path: string) => {
     const project = projects.find((item) => item.path === path);
     updateProjectPreference(path, { pinned: !project?.pinned });
@@ -2269,10 +2286,7 @@ export function App() {
             onAddProject={() => void addProject()}
             onSelectProject={(path) => {
               if (agent.hasActiveRuns) return;
-              openProjectWithoutTaskRef.current = true;
-              setActiveProjectPath(path);
-              setActivePage("tasks");
-              setFocusPanelOpen(false);
+              selectProject(path);
               closeSidebarOnNarrow();
             }}
             onCreateTask={createTask}
