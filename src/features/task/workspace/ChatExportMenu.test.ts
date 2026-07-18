@@ -21,7 +21,7 @@ describe("serializeChat", () => {
 
   it("includes optional tool calls and published reasoning summaries", () => {
     const value = serializeChat("A task", timeline, { user: false, assistant: false, tools: true, reasoning: true });
-    expect(value).toContain("### Thought");
+    expect(value).toContain("### Reasoning");
     expect(value).toContain("npm test");
     expect(value).not.toContain("Please fix it");
   });

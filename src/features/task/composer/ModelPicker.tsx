@@ -61,8 +61,9 @@ export function ModelPicker(props: ModelPickerProps) {
           const selected = selectedModel ? model.model === selectedModel : model.isDefault;
           const price = apiPricing[model.model];
           return <button type="button" className={selected ? "is-selected" : ""} key={model.id} onClick={() => onModelChange(model.isDefault ? null : model.model)}>
+            <span className="model-picker__row-icon"><OpenAIIcon /></span>
             <span><strong>{model.displayName}</strong><small>{model.description}</small></span>
-            <span className="model-price" title={price ? `Official API price per 1M tokens: $${price.input} input, ${price.cached == null ? "no cached rate" : `$${price.cached} cached`}, $${price.output} output.` : "This Codex account model has no published API-equivalent price."}>{price ? `$${price.input} in · $${price.output} out` : "No public API price"}</span>
+            <span className="model-price" title={price ? `Official API price per 1M tokens: $${price.input} input, ${price.cached == null ? "no cached rate" : `$${price.cached} cached`}, $${price.output} output.` : "This Codex account model has no published API-equivalent price."}>{price ? <><b>${price.input}</b> in <i>·</i> <b>${price.output}</b> out</> : "No public API price"}</span>
             {selected ? <XiaoIcon name="check" size={14}/> : null}
           </button>;
         })}

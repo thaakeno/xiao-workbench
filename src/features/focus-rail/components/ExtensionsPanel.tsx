@@ -96,6 +96,17 @@ const withTimeout = <T,>(promise: Promise<T>, milliseconds: number, label: strin
   new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error(`${label} timed out; cached data is still shown.`)), milliseconds)),
 ]);
 
+const highlightMarkdownLine = (line: string, index: number) => {
+  if (/^#{1,6}\s/.test(line)) return <span className="syntax-heading" key={index}>{line}</span>;
+  if (/^\s*[-*+]\s/.test(line)) return <span className="syntax-list" key={index}>{line}</span>;
+  if (/^---+$/.test(line.trim())) return <span className="syntax-rule" key={index}>{line}</span>;
+  const fragments = line.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^\)]+\)|\$\{[^}]+\})/g);
+  return <span key={index}>{fragments.map((fragment, part) => {
+    const className = fragment.startsWith("`") ? "syntax-code" : fragment.startsWith("**") ? "syntax-strong" : fragment.startsWith("[") ? "syntax-link" : fragment.startsWith("${") ? "syntax-variable" : undefined;
+    return <i className={className} key={part}>{fragment}</i>;
+  })}</span>;
+};
+
 export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelProps) {
   const runtimeAvailable = runtime.phase === "ready" || runtime.phase === "working";
   const initialSnapshot = useMemo(() => readCapabilitySnapshot(workspace.path), [workspace.path]);
@@ -370,7 +381,7 @@ export function ExtensionsPanel({ workspace, taskId, runtime }: ExtensionsPanelP
             </header>
             <div className="skill-editor__surface">
               <div className="skill-editor__gutter" aria-hidden="true">{skillSource.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>
-              <textarea aria-label="Skill Markdown instructions" spellCheck={false} value={skillSource} disabled={editorBusy && !skillSource} onChange={(event) => setSkillSource(event.target.value)} />
+              <div className="skill-editor__code"><pre aria-hidden="true">{skillSource.split("\n").map(highlightMarkdownLine)}</pre><textarea aria-label="Skill Markdown instructions" spellCheck={false} value={skillSource} disabled={editorBusy && !skillSource} onChange={(event) => setSkillSource(event.target.value)} /></div>
             </div>
             <footer><small>Markdown · saved directly to your local Codex skill</small><button className="button button--quiet" type="button" disabled={editorBusy} onClick={() => setEditingSkill(null)}>Cancel</button><button className="button" type="button" disabled={editorBusy || !skillSource.trim()} onClick={() => void saveSkill()}>{editorBusy ? "Saving…" : "Save skill"}</button></footer>
           </section>
