@@ -25,10 +25,12 @@ import type {
 import { serviceTierForFastMode } from "../features/agent/hooks/agentProtocol";
 import {
   listCodexThreads,
+  listRecentCodexThreads,
   peekCodexThreadTimeline,
   prefetchCodexThreadTimeline,
   readCodexThreadChangeSummary,
   readCodexThreadTimeline,
+  refreshCodexThreadTimeline,
   sameWorkspacePath,
 } from "../features/agent/history/codexHistory";
 import { titleFromPrompt, useAgentRuntime } from "../features/agent/hooks/useAgentRuntime";
@@ -669,6 +671,37 @@ const mergeCodexTasks = (current: WorkbenchTask[], threads: CodexThreadSummary[]
   );
 };
 
+const materializeImportedTask = (source: WorkbenchTask): WorkbenchTask => {
+  const createdAt = Date.now();
+  return completeTimelineMetadata({
+    ...source,
+    id: crypto.randomUUID(),
+    title: source.title,
+    archived: false,
+    pinned: false,
+    unread: false,
+    createdAt,
+    updatedAt: createdAt,
+    draftText: "",
+    followUps: [],
+    threadId: null,
+    threadBinding: null,
+    origin: "xiao",
+    sourceCwd: undefined,
+    historyLoaded: true,
+    historyCursor: null,
+    historyLoadingOlder: false,
+    executionEnvironmentId: null,
+    workspaceMode: "local",
+    managedWorktreeId: null,
+    goal: null,
+    meta: "Now",
+    group: "Active" as const,
+    timeline: source.timeline.map((entry) => ({ ...entry })),
+    plan: source.plan ? { ...source.plan, steps: source.plan.steps.map((step) => ({ ...step })) } : null,
+  });
+};
+
 const upsertCodexTask = (current: WorkbenchTask[], thread: CodexThreadSummary) => {
   const index = current.findIndex((task) => task.threadId === thread.id);
   if (index < 0) {
@@ -744,6 +777,11 @@ export function App() {
   const notifiedRuntimeErrorRef = useRef<string | null>(null);
   const notifiedApprovalRef = useRef<string | null>(null);
   const notifiedQuestionRef = useRef<string | null>(null);
+  const pendingImportedSubmissionRef = useRef<{
+    taskId: string;
+    prompt: string;
+    attachments: AgentAttachment[];
+  } | null>(null);
   const previousRateLimitsRef = useRef<AgentRateLimits | null>(null);
   const [projects, setProjects] = useState<XiaoProjectSummary[]>(() =>
     applyProjectPreferences(
@@ -774,6 +812,9 @@ export function App() {
     Record<string, ThreadChangeSummary | null>
   >(() => readSnapshot(changeSummarySnapshotStorageKey, {}));
   const codexHistoryRefreshRef = useRef(0);
+  const codexThreadUpdatedAtRef = useRef(new Map<string, number>());
+  const externalCodexRunningUntilRef = useRef(new Map<string, number>());
+  const [externalCodexRunningIds, setExternalCodexRunningIds] = useState<string[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<ArchivedTaskItem[]>([]);
   const [archivedTasksLoading, setArchivedTasksLoading] = useState(false);
   const [archivedTasksError, setArchivedTasksError] = useState<string | null>(null);
@@ -1002,6 +1043,59 @@ export function App() {
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [preferences.importCodexHistory]);
+
+  useEffect(() => {
+    if (!preferences.importCodexHistory || !isTauriHost()) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const recent = await listRecentCodexThreads();
+        if (cancelled) return;
+        const changed = recent.filter((thread) => {
+          const previous = codexThreadUpdatedAtRef.current.get(thread.id);
+          codexThreadUpdatedAtRef.current.set(thread.id, thread.updatedAt);
+          return previous != null && thread.updatedAt > previous;
+        });
+        if (recent.length) {
+          setCodexThreads((current) => {
+            const next = new Map(current.map((thread) => [thread.id, thread]));
+            recent.forEach((thread) => next.set(thread.id, thread));
+            return [...next.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+          });
+        }
+        const now = Date.now();
+        changed.forEach((thread) => externalCodexRunningUntilRef.current.set(`codex:${thread.id}`, now + 6_000));
+        setExternalCodexRunningIds([...externalCodexRunningUntilRef.current.entries()]
+          .filter(([, until]) => until > now)
+          .map(([id]) => id));
+
+        if (activeTask.origin === "codex" && activeTask.threadId && changed.some((thread) => thread.id === activeTask.threadId)) {
+          const page = await refreshCodexThreadTimeline(activeTask.threadId);
+          if (cancelled) return;
+          setTasks((current) => current.map((task) => task.id === activeTask.id ? {
+            ...task,
+            timeline: page.timeline,
+            timelineLoaded: true,
+            timelineComplete: page.nextCursor === null,
+            timelineEntryCount: page.timeline.length,
+            historyCursor: page.nextCursor,
+          } : task));
+        }
+      } catch {
+        // The next bounded poll retries without disturbing the current task.
+      }
+    };
+    const schedule = () => {
+      timer = window.setTimeout(() => { void poll().finally(schedule); }, 2_500);
+    };
+    void poll().finally(schedule);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeTask.id, activeTask.origin, activeTask.threadId, preferences.importCodexHistory]);
 
   useEffect(() => {
     if (!preferences.importCodexHistory || !isTauriHost()) return;
@@ -1402,6 +1496,25 @@ export function App() {
     !codexUpdate.updating && Boolean(executionTaskId),
   );
 
+  useEffect(() => {
+    const pending = pendingImportedSubmissionRef.current;
+    if (
+      !pending ||
+      pending.taskId !== activeTask.id ||
+      executionTaskId !== pending.taskId ||
+      activeEnvironmentBusy ||
+      agent.runtime.phase !== "ready"
+    ) return;
+    pendingImportedSubmissionRef.current = null;
+    void agent.submit(pending.prompt, pending.attachments).then((sent) => {
+      if (sent) return;
+      updateTaskDraft(pending.taskId, pending.prompt);
+      if (pending.attachments.length) {
+        setRestoredAttachmentsByTask((current) => ({ ...current, [pending.taskId]: pending.attachments }));
+      }
+    });
+  }, [activeEnvironmentBusy, activeTask.id, agent.runtime.phase, executionTaskId]);
+
   const prefetchTaskHistory = useCallback((taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
     if (
@@ -1672,6 +1785,30 @@ export function App() {
       taskStateError ||
       workspaceError
     ) return false;
+
+    if (selectedTask?.origin === "codex") {
+      const materializedTask = materializeImportedTask(selectedTask);
+      const persistedTasks = [materializedTask, ...tasks];
+      pendingImportedSubmissionRef.current = {
+        taskId: materializedTask.id,
+        prompt,
+        attachments,
+      };
+      setTasks(persistedTasks);
+      setOpenTaskIds((current) => [...current.filter((id) => id !== selectedTask.id), materializedTask.id]);
+      setActiveTaskId(materializedTask.id);
+      try {
+        await persistTaskState(workspace.path, {
+          tasks: persistedTasks,
+          activeTaskId: materializedTask.id,
+          showArchived: false,
+        });
+        return true;
+      } catch {
+        pendingImportedSubmissionRef.current = null;
+        return false;
+      }
+    }
 
     let persistedTasks = tasks;
     let persistedActiveTaskId = activeTaskId;
@@ -2096,35 +2233,7 @@ export function App() {
     if (!taskStateReady) return;
     const source = tasks.find((task) => task.id === taskId);
     if (!source) return;
-    const createdAt = Date.now();
-    if (!source.timelineComplete) return;
-    const task: WorkbenchTask = completeTimelineMetadata({
-      ...source,
-      id: crypto.randomUUID(),
-      title: `Continue: ${source.title}`,
-      archived: false,
-      pinned: false,
-      unread: false,
-      createdAt,
-      updatedAt: createdAt,
-      draftText: "",
-      followUps: [],
-      threadId: null,
-      threadBinding: null,
-      origin: "xiao",
-      sourceCwd: undefined,
-      historyLoaded: true,
-      historyCursor: null,
-      historyLoadingOlder: false,
-      executionEnvironmentId: null,
-      workspaceMode: "local",
-      managedWorktreeId: null,
-      goal: null,
-      meta: "Now",
-      group: "Active" as const,
-      timeline: source.timeline.map((entry) => ({ ...entry })),
-      plan: source.plan ? { ...source.plan, steps: source.plan.steps.map((step) => ({ ...step })) } : null,
-    });
+    const task = materializeImportedTask(source);
     setTasks((current) => [task, ...current]);
     setActiveTaskId(task.id);
     setActivePage("tasks");
@@ -2480,7 +2589,7 @@ export function App() {
             tasks={tasks}
             activeTaskId={selectedTask?.id ?? ""}
             workspace={workspace}
-            workingTaskIds={agent.workingTaskIds}
+            workingTaskIds={[...new Set([...agent.workingTaskIds, ...externalCodexRunningIds])]}
             account={agent.account}
             rateLimits={rateLimits}
             codexThreads={preferences.importCodexHistory ? codexThreads : []}

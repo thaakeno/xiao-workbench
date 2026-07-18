@@ -115,6 +115,7 @@ export function ActivityItem({
 }: ActivityItemProps) {
   const [allFilesVisible, setAllFilesVisible] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const [userMessageExpanded, setUserMessageExpanded] = useState(false);
   const waitingForApproval = entry.kind === "approval" && entry.status === "warning";
   const userMessage = entry.kind === "brief" || entry.kind === "user";
   const assistantMessage = entry.kind === "result" && entry.title === "Agent response";
@@ -146,6 +147,8 @@ export function ActivityItem({
   }
 
   if (userMessage) {
+    const message = entry.body ?? entry.title;
+    const messageCollapsible = message.length > 520 || message.split("\n").length > 9;
     const reviewComments = entry.attachments?.filter((attachment) => attachment.kind === "review") ?? [];
     const images = entry.attachments?.filter((attachment) => attachment.kind === "image") ?? [];
     return (
@@ -154,7 +157,15 @@ export function ActivityItem({
         style={{ "--activity-index": index } as React.CSSProperties}
       >
         <div className="activity__user-message-content">
-          <div className="activity__user-bubble">{entry.body ?? entry.title}</div>
+          <div className={`activity__user-bubble ${messageCollapsible && !userMessageExpanded ? "is-collapsed" : ""}`}>
+            <div className="activity__user-bubble-text">{message}</div>
+            {messageCollapsible ? (
+              <button className="activity__user-expand" type="button" aria-expanded={userMessageExpanded} onClick={() => setUserMessageExpanded((expanded) => !expanded)}>
+                {userMessageExpanded ? "Show less" : "Show more"}
+                <XiaoIcon name="caret" size={12} />
+              </button>
+            ) : null}
+          </div>
           {images.length ? <div className="activity__message-images">{images.map((image) => {
             const src = image.url ?? (isTauriHost() ? convertFileSrc(image.path) : "");
             return src ? <button type="button" key={image.path} onClick={() => setPreviewImage({ src, name: image.name })}><img src={src} alt={image.name} /></button> : null;

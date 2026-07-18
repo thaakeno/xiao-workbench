@@ -138,6 +138,15 @@ export type CodexThreadPage = {
   nextCursor: string | null;
 };
 
+export const listRecentCodexThreads = async (): Promise<CodexThreadSummary[]> => {
+  const response = await nativeBridge.listCodexThreadsPage(false, null);
+  return (Array.isArray(response.data) ? response.data : []).flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const summary = threadSummary(row as RawThread, false);
+    return summary ? [summary] : [];
+  });
+};
+
 const firstPageCache = new Map<string, CodexThreadPage>();
 const firstPageRequests = new Map<string, Promise<CodexThreadPage>>();
 
@@ -202,13 +211,17 @@ const fetchCodexThreadTimeline = async (
         )
       : [];
     const turnDiff = diffForTurn(items);
+    const completedSeconds = typeof turn.completedAt === "number"
+      ? turn.completedAt
+      : typeof turn.updatedAt === "number" ? turn.updatedAt : null;
+    const durationMs = completedSeconds ? Math.max(0, completedSeconds * 1_000 - createdAt) : undefined;
     return items.flatMap((item) => {
       if (item.type === "userMessage") {
         const entry = userEntry(item, createdAt, turnId, turnDiff);
-        return entry ? [entry] : [];
+        return entry ? [{ ...entry, durationMs }] : [];
       }
       const entry = timelineEntryFromItem(item, createdAt);
-      return entry ? [{ ...entry, turnId }] : [];
+      return entry ? [{ ...entry, turnId, durationMs }] : [];
     });
   });
   return {
@@ -244,6 +257,12 @@ export const readCodexThreadTimeline = (
 ): Promise<CodexThreadPage> => cursor
   ? fetchCodexThreadTimeline(threadId, cursor)
   : prefetchCodexThreadTimeline(threadId);
+
+export const refreshCodexThreadTimeline = async (threadId: string): Promise<CodexThreadPage> => {
+  const page = await fetchCodexThreadTimeline(threadId);
+  firstPageCache.set(threadId, page);
+  return page;
+};
 
 export const sameWorkspacePath = (left: string, right: string) =>
   left.replace(/[\\/]+$/, "").toLocaleLowerCase() ===

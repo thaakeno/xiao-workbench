@@ -331,7 +331,7 @@ export function TaskWorkspace({
       onDraftChange={onDraftChange}
       onResolveQuestion={onResolveQuestion}
       disabled={
-        taskArchived || taskStateLoading || environmentBusy || Boolean(taskStateError) || taskId.startsWith("codex:")
+        taskArchived || taskStateLoading || environmentBusy || Boolean(taskStateError)
       }
       disabledPlaceholder={taskStateLoading
         ? "Loading task history…"
@@ -413,7 +413,7 @@ export function TaskWorkspace({
           runtime={runtime}
           showReasoningSummaries={showReasoningSummaries}
           expandToolOutput={expandToolOutput}
-          historyLoading={taskStateLoading}
+          historyLoading={taskStateLoading && timeline.length === 0 && !taskId.startsWith("codex:")}
           historyHasMore={historyHasMore}
           canFork={canFork}
           onForkTask={onForkTask}

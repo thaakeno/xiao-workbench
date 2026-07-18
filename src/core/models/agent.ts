@@ -51,6 +51,7 @@ export type TimelineEntry = {
   kind: "brief" | "thought" | "command" | "explore" | "change" | "result" | "approval" | "user";
   title: string;
   createdAt?: number;
+  durationMs?: number;
   body?: string;
   meta?: string;
   status?: "idle" | "active" | "success" | "warning" | "error";

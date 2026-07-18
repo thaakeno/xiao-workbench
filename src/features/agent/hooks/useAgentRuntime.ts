@@ -393,12 +393,14 @@ export const timelineEntryFromItem = (
   }
 
   if (item.type === "webSearch") {
+    const query = typeof item.query === "string" ? item.query : "Web search";
     return {
       id,
-      kind: "result",
+      kind: "explore",
       createdAt,
-      title: typeof item.query === "string" ? `Searched: ${item.query}` : "Web search",
+      title: "Web search",
       meta: "Browser tool",
+      exploration: [{ kind: "web", command: query, label: query, query }],
       status: "success",
     };
   }

@@ -39,9 +39,7 @@ pub async fn send_desktop_notification(
         return tauri::async_runtime::spawn_blocking(move || {
             let mut notification = notify_rust::Notification::new();
             notification.summary(&title).body(&body);
-            if !cfg!(debug_assertions) {
-                notification.app_id(&app_id);
-            }
+            notification.app_id(&app_id);
             notification.show().map(|_| ()).map_err(|error| error.to_string())
         })
         .await

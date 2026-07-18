@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { XiaoIcon, type XiaoIconName } from "../../../components/icons/XiaoIcon";
 import type { AgentExplorationAction, TimelineEntry } from "../../../core/models/agent";
 
@@ -8,6 +10,14 @@ type ExplorationGroupProps = {
   startedAt: number | null;
 };
 
+type ProjectedAction = {
+  action: AgentExplorationAction;
+  entryId: string;
+  status: TimelineEntry["status"];
+  provider: string | null;
+  operation: string | null;
+};
+
 const iconByAction: Record<AgentExplorationAction["kind"], XiaoIconName> = {
   command: "command",
   list: "folderOpen",
@@ -16,53 +26,49 @@ const iconByAction: Record<AgentExplorationAction["kind"], XiaoIconName> = {
   web: "browser",
 };
 
-const countLabel = (count: number, singular: string) =>
-  `${count} ${count === 1 ? singular : `${singular}s`}`;
-
 const actionLabel = (action: AgentExplorationAction) => {
   if (action.kind === "command") return "Ran";
   if (action.kind === "read") return "Read";
   if (action.kind === "search") return "Searched";
-  if (action.kind === "web") return "Searched web";
+  if (action.kind === "web") return "Searched";
   return "Listed";
 };
 
 const elapsedLabel = (elapsedMs: number) => {
-  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
+  const seconds = Math.max(1, Math.floor(elapsedMs / 1_000));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 };
 
+const operationLabel = (operation: string, count: number) =>
+  `${operation.charAt(0).toUpperCase()}${operation.slice(1)} ${count} ${count === 1 ? "time" : "times"}`;
+
 export function ExplorationGroup({ entries, index, expandByDefault, startedAt }: ExplorationGroupProps) {
   const [now, setNow] = useState(Date.now);
-  const actions = entries.flatMap((entry) => {
+  const actions = useMemo<ProjectedAction[]>(() => entries.flatMap((entry) => {
+    const plugin = entry.meta === "Plugin tool";
+    const [provider, operation] = plugin ? entry.title.split(" · ", 2) : [null, null];
     const projected = entry.exploration?.length
       ? entry.exploration
       : entry.kind === "command"
-        ? [{ kind: "command" as const, command: entry.command ?? entry.title, label: entry.title }]
+        ? [{ kind: "command" as const, command: entry.command ?? entry.title, label: operation ?? entry.title }]
         : [];
-    return projected.map((action) => ({
-      action,
-      entryId: entry.id,
-      status: entry.status,
-    }));
-  });
-  const reads = actions.filter(({ action }) => action.kind === "read").length;
-  const searches = actions.filter(({ action }) => action.kind === "search").length;
-  const lists = actions.filter(({ action }) => action.kind === "list").length;
-  const commands = actions.filter(({ action }) => action.kind === "command").length;
-  const web = actions.filter(({ action }) => action.kind === "web").length;
+    return projected.map((action) => ({ action, entryId: entry.id, status: entry.status, provider, operation }));
+  }), [entries]);
   const active = entries.some((entry) => entry.status === "active");
   const failed = entries.some((entry) => entry.status === "error");
-  const counts = [
-    reads ? countLabel(reads, "read") : null,
-    searches ? countLabel(searches, "search") : null,
-    lists ? countLabel(lists, "list") : null,
-    commands ? countLabel(commands, "command") : null,
-    web ? countLabel(web, "web search") : null,
-  ].filter((value): value is string => Boolean(value));
   const firstEventAt = entries.find((entry) => entry.createdAt)?.createdAt ?? null;
   const lastEventAt = [...entries].reverse().find((entry) => entry.createdAt)?.createdAt ?? null;
-  const elapsed = elapsedLabel(Math.max(0, (active ? now : lastEventAt ?? now) - (startedAt ?? firstEventAt ?? now)));
+  const recordedDuration = Math.max(0, ...entries.map((entry) => entry.durationMs ?? 0));
+  const start = startedAt ?? firstEventAt ?? now;
+  const inferredEnd = lastEventAt && lastEventAt > start ? lastEventAt : start + Math.max(1, actions.length) * 1_000;
+  const elapsed = elapsedLabel(recordedDuration || Math.max(1_000, (active ? now : inferredEnd) - start));
+  const toolProviders = useMemo(() => {
+    const grouped = new Map<string, ProjectedAction[]>();
+    actions.filter((item) => item.provider).forEach((item) => grouped.set(item.provider!, [...(grouped.get(item.provider!) ?? []), item]));
+    return [...grouped];
+  }, [actions]);
+  const webActions = actions.filter(({ action, provider }) => !provider && action.kind === "web");
+  const otherActions = actions.filter(({ action, provider }) => !provider && action.kind !== "web");
 
   useEffect(() => {
     if (!active) return;
@@ -70,44 +76,34 @@ export function ExplorationGroup({ entries, index, expandByDefault, startedAt }:
     return () => window.clearInterval(timer);
   }, [active]);
 
+  const actionRow = ({ action, entryId, status }: ProjectedAction, actionIndex: number) => (
+    <div className={`exploration-group__item is-${status ?? "idle"} is-${action.kind}`} key={`${entryId}-${actionIndex}-${action.command}`} title={action.command}>
+      <span><XiaoIcon name={iconByAction[action.kind]} size={13} /></span>
+      <div><strong>{actionLabel(action)}</strong><code>{action.kind === "search" || action.kind === "web" ? action.query || action.label : action.label}</code>{action.path && action.path !== action.label ? <small>{action.path}</small> : null}</div>
+      {status === "active" ? <i className="activity__pulse" /> : null}
+    </div>
+  );
+
   return (
-    <article
-      className={`activity exploration-group ${active ? "is-active" : ""} ${failed ? "is-error" : ""}`}
-      style={{ "--activity-index": index } as React.CSSProperties}
-    >
+    <article className={`activity exploration-group ${active ? "is-active" : ""} ${failed ? "is-error" : ""}`} style={{ "--activity-index": index } as React.CSSProperties}>
       <details open={active || expandByDefault}>
-        <summary>
-          <span className="exploration-group__mark">
-            <XiaoIcon name="search" size={13} />
-          </span>
-          <strong>{active ? "Working for" : "Worked for"} {elapsed}</strong>
-          <span>{counts.join(", ") || countLabel(entries.length, "action")}</span>
-          {active ? <i className="activity__pulse" /> : null}
-          <XiaoIcon className="exploration-group__caret" name="caret" size={12} />
-        </summary>
+        <summary><strong>{active ? "Working for" : "Worked for"} {elapsed}</strong>{active ? <i className="activity__pulse" /> : null}<XiaoIcon className="exploration-group__caret" name="caret" size={12} /></summary>
         <div className="exploration-group__items">
-          {actions.map(({ action, entryId, status }, actionIndex) => (
-            <div
-              className={`exploration-group__item is-${status ?? "idle"} is-${action.kind}`}
-              key={`${entryId}-${actionIndex}-${action.command}`}
-              title={action.command}
-            >
-              <span><XiaoIcon name={iconByAction[action.kind]} size={13} /></span>
-              <div>
-                <strong>{actionLabel(action)}</strong>
-                {action.kind === "web" && /^https?:\/\//i.test(action.label) ? (
-                  <a href={action.label} target="_blank" rel="noreferrer">{action.label}</a>
-                ) : (
-                  <code>{action.kind === "search" ? action.query || action.label : action.label}</code>
-                )}
-                {action.path && action.path !== action.label ? <small>{action.path}</small> : null}
-              </div>
-              {status === "active" ? <i className="activity__pulse" /> : null}
-            </div>
-          ))}
+          {toolProviders.map(([provider, providerActions]) => {
+            const counts = new Map<string, number>();
+            providerActions.forEach(({ operation }) => counts.set(operation ?? "use", (counts.get(operation ?? "use") ?? 0) + 1));
+            return <details className="exploration-tool-group" key={provider} open={active}>
+              <summary><XiaoIcon name="capability" size={15} /><strong>{provider}</strong><XiaoIcon name="caret" size={12} /></summary>
+              <div>{[...counts].map(([operation, count]) => <span key={operation}>{operationLabel(operation, count)}</span>)}</div>
+            </details>;
+          })}
+          {webActions.length ? <details className="exploration-tool-group is-web" open={active}>
+            <summary><XiaoIcon name="browser" size={15} /><strong>Web search</strong><small>Searched {webActions.length} {webActions.length === 1 ? "time" : "times"}</small><XiaoIcon name="caret" size={12} /></summary>
+            <div className="exploration-tool-group__queries">{webActions.map(actionRow)}</div>
+          </details> : null}
+          {otherActions.map(actionRow)}
         </div>
       </details>
     </article>
   );
 }
-import { useEffect, useState } from "react";
