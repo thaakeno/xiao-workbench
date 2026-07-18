@@ -210,6 +210,9 @@ export function Composer({
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [activeSlashCommand, setActiveSlashCommand] = useState(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const draftChangeTimer = useRef<number | null>(null);
+  const pendingDraft = useRef<{ value: string; commit: (draft: string) => void } | null>(null);
+  const textareaResizeFrame = useRef<number | null>(null);
   const promptHistory = useRef<string[]>([]);
   const promptHistoryIndex = useRef(-1);
   const promptHistoryDraft = useRef<string | null>(null);
@@ -255,6 +258,15 @@ export function Composer({
   useEffect(() => {
     setValue((current) => current === draftText ? current : draftText);
   }, [draftText]);
+
+  useEffect(() => () => {
+    if (draftChangeTimer.current !== null) window.clearTimeout(draftChangeTimer.current);
+    if (textareaResizeFrame.current !== null) window.cancelAnimationFrame(textareaResizeFrame.current);
+    if (pendingDraft.current !== null) {
+      pendingDraft.current.commit(pendingDraft.current.value);
+      pendingDraft.current = null;
+    }
+  }, [taskId]);
 
   useEffect(() => {
     if (!fileMention) {
@@ -358,9 +370,37 @@ export function Composer({
     onRestoredAttachmentsConsumed();
   }, [restoredAttachments]);
 
-  const updateValue = (next: string) => {
+  const flushDraftChange = () => {
+    if (draftChangeTimer.current !== null) {
+      window.clearTimeout(draftChangeTimer.current);
+      draftChangeTimer.current = null;
+    }
+    if (pendingDraft.current === null) return;
+    const draft = pendingDraft.current;
+    pendingDraft.current = null;
+    draft.commit(draft.value);
+  };
+
+  const updateValue = (next: string, immediate = false) => {
     setValue(next);
-    onDraftChange(next);
+    pendingDraft.current = { value: next, commit: onDraftChange };
+    if (immediate) {
+      flushDraftChange();
+      return;
+    }
+    if (draftChangeTimer.current !== null) window.clearTimeout(draftChangeTimer.current);
+    draftChangeTimer.current = window.setTimeout(flushDraftChange, 240);
+  };
+
+  const resizeTextarea = () => {
+    if (textareaResizeFrame.current !== null) return;
+    textareaResizeFrame.current = window.requestAnimationFrame(() => {
+      textareaResizeFrame.current = null;
+      const node = textarea.current;
+      if (!node) return;
+      node.style.height = "auto";
+      node.style.height = `${Math.min(node.scrollHeight, 150)}px`;
+    });
   };
 
   const syncFileMention = (text: string, cursor: number | null) => {
@@ -477,7 +517,7 @@ export function Composer({
       return;
     }
 
-    updateValue("");
+    updateValue("", true);
     if (textarea.current) textarea.current.style.height = "auto";
     switch (command.id) {
       case "plan":
@@ -1001,9 +1041,9 @@ export function Composer({
               updateValue(event.target.value);
               syncFileMention(event.target.value, event.target.selectionStart);
               syncSlashCommand(event.target.value, event.target.selectionStart);
-              event.currentTarget.style.height = "auto";
-              event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 150)}px`;
+              resizeTextarea();
             }}
+            onBlur={flushDraftChange}
             onKeyDown={(event) => {
               if (slashQuery !== null) {
                 const ctrlNavigation = event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
