@@ -5204,7 +5204,7 @@ dependencies = [
 
 [[package]]
 name = "xiao-workbench"
-version = "0.0.0-day07162026"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "chrono-tz",
