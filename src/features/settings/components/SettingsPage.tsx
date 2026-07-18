@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { XiaoIcon, type XiaoIconName } from "../../../components/icons/XiaoIcon";
-import { isTauriHost } from "../../../core/bridges/tauri";
+import { isTauriHost, nativeBridge } from "../../../core/bridges/tauri";
 import type {
   AgentAccountSummary,
   AgentModelSummary,
@@ -22,7 +22,7 @@ export type ArchivedTaskItem = {
   threadId?: string | null;
 };
 
-type SettingsSection = "agent" | "archived" | "general" | "models" | "runtime" | "shortcuts";
+type SettingsSection = "agent" | "archived" | "general" | "info" | "models" | "runtime" | "shortcuts";
 
 type SettingsPageProps = {
   theme: Theme;
@@ -63,6 +63,7 @@ const sections: Array<{ id: SettingsSection; label: string; icon: XiaoIconName; 
   { id: "runtime", label: "Runtime", icon: "runtime", group: "System" },
   { id: "shortcuts", label: "Shortcuts", icon: "command", group: "System" },
   { id: "archived", label: "Archive", icon: "archive", group: "Data" },
+  { id: "info", label: "About & updates", icon: "target", group: "Data" },
 ];
 
 const shortcuts = [
@@ -137,6 +138,14 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [modelQuery, setModelQuery] = useState("");
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  const [xiaoUpdate, setXiaoUpdate] = useState<Awaited<ReturnType<typeof nativeBridge.checkXiaoUpdate>> | null>(null);
+  const [xiaoUpdateBusy, setXiaoUpdateBusy] = useState(false);
+  const [xiaoUpdateError, setXiaoUpdateError] = useState<string | null>(null);
+  const [reportKind, setReportKind] = useState<"bug" | "feature">("bug");
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportFiles, setReportFiles] = useState<File[]>([]);
   const sortedArchivedTasks = [...archivedTasks].sort((a, b) => b.updatedAt - a.updatedAt);
   const visibleModels = useMemo(() => {
     const query = modelQuery.trim().toLowerCase();
@@ -145,6 +154,34 @@ export function SettingsPage({
   const notificationPermission = isTauriHost()
     ? "Native OS alerts"
     : "Notification" in window ? Notification.permission : "unsupported";
+
+  useEffect(() => {
+    if (!isTauriHost()) return;
+    void nativeBridge.getAutostartSettings().then((value) => onPreferencesChange({ autostart: value.enabled, autostartBackground: value.background })).catch(() => undefined);
+  }, []);
+
+  const updateAutostart = async (enabled: boolean, background = preferences.autostartBackground) => {
+    onPreferencesChange({ autostart: enabled, autostartBackground: background });
+    if (!isTauriHost()) return;
+    setAutostartBusy(true);
+    try {
+      const value = await nativeBridge.setAutostartSettings(enabled, background);
+      onPreferencesChange({ autostart: value.enabled, autostartBackground: value.background });
+    } finally { setAutostartBusy(false); }
+  };
+
+  const checkXiaoUpdate = async () => {
+    setXiaoUpdateBusy(true); setXiaoUpdateError(null);
+    try { setXiaoUpdate(await nativeBridge.checkXiaoUpdate()); }
+    catch (reason) { setXiaoUpdateError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setXiaoUpdateBusy(false); }
+  };
+
+  const submitReport = () => {
+    const diagnostics = `\n\n---\nXiao: ${xiaoUpdate?.currentVersion ?? "development"}\nPlatform: ${system.platform}\nCodex: ${system.codexVersion ?? "unknown"}\nAttachments selected locally: ${reportFiles.map((file) => file.name).join(", ") || "none"}`;
+    const body = `${reportDescription.trim()}${diagnostics}`;
+    window.open(`https://github.com/thaakeno/xiao-workbench/issues/new?${new URLSearchParams({ title: reportTitle.trim(), body, labels: reportKind === "bug" ? "bug" : "enhancement" })}`, "_blank", "noopener,noreferrer");
+  };
 
   const updateNotification = (key: "notifyApprovals" | "notifyCompletions" | "notifyErrors" | "notifyUsageAlerts", checked: boolean) => {
     onPreferencesChange({ [key]: checked });
@@ -228,6 +265,8 @@ export function SettingsPage({
                 <div className="settings-list">
                   <SettingRow title="Focused new tasks" description="Collapse the sidebar and review panel when a blank task opens."><Toggle label="Focused new tasks" checked={preferences.focusNewTasks} onChange={(focusNewTasks) => onPreferencesChange({ focusNewTasks })} /></SettingRow>
                   <SettingRow title="Wrap long code" description="Wrap code in file previews instead of scrolling horizontally."><Toggle label="Wrap long code" checked={preferences.wrapCode} onChange={(wrapCode) => onPreferencesChange({ wrapCode })} /></SettingRow>
+                  <SettingRow title="Start with Windows" description="Launch Xiao automatically after you sign in."><Toggle label="Start Xiao with Windows" checked={preferences.autostart} onChange={(enabled) => void updateAutostart(enabled)} /></SettingRow>
+                  {preferences.autostart ? <SettingRow title="Startup behavior" description="Open the workspace immediately or remain quietly available from the system tray."><div className="settings-segmented"><button disabled={autostartBusy} className={!preferences.autostartBackground ? "is-active" : ""} onClick={() => void updateAutostart(true, false)}>Foreground</button><button disabled={autostartBusy} className={preferences.autostartBackground ? "is-active" : ""} onClick={() => void updateAutostart(true, true)}>Background</button></div></SettingRow> : null}
                 </div>
               </div>
             </section>
@@ -353,6 +392,26 @@ export function SettingsPage({
                   {sortedArchivedTasks.map((item) => <li key={`${item.projectPath}:${item.taskId}`}><div className="archived-task-list__copy"><h3>{item.title}</h3><p><span title={item.projectPath}>{item.projectName}</span><span aria-hidden="true">·</span><time dateTime={new Date(item.updatedAt).toISOString()}>{archivedTaskDate.format(item.updatedAt)}</time></p></div><button type="button" onClick={() => onRestoreArchivedTask(item)}>Restore</button></li>)}
                 </ul>
               )}
+            </section>
+          )}
+          {activeSection === "info" && (
+            <section className="settings-section settings-info" aria-labelledby="info-heading">
+              <header><span>Xiao desktop</span><h2 id="info-heading">About & updates</h2><p>Release history, secure upstream updates, and a useful route for reporting problems.</p></header>
+              <div className={`xiao-update-card ${xiaoUpdate?.updateAvailable ? "is-available" : ""}`}>
+                <span><XiaoIcon name="target" size={20} /></span>
+                <div><strong>{xiaoUpdate?.updateAvailable ? xiaoUpdate.releaseName : "Xiao Workbench"}</strong><p>{xiaoUpdateError ?? (xiaoUpdate ? `${xiaoUpdate.currentVersion} · ${xiaoUpdate.updateAvailable ? `${xiaoUpdate.latestVersion} is ready` : "up to date"}` : "Updates are verified against the official upstream release and SHA-256 digest.")}</p></div>
+                <div><button className="button button--quiet" disabled={xiaoUpdateBusy} onClick={() => void checkXiaoUpdate()}>{xiaoUpdateBusy ? "Checking…" : "Check"}</button>{xiaoUpdate?.updateAvailable ? <button className="button button--primary" onClick={() => void nativeBridge.installXiaoUpdate()}>Install & restart</button> : null}</div>
+              </div>
+              <div className="settings-block changelog-panel"><h3>What’s new</h3>
+                {[{ version: "Phase 6", title: "Updates and app controls", items: ["Verified in-app Windows updates", "Windows startup in foreground or tray", "Built-in changelog and report workflow"] }, { version: "Phase 5", title: "Smarter controls", items: ["Unified model, effort, and speed picker", "Granular transcript export with exact visible-text tokens"] }, { version: "Phase 4", title: "Local capabilities", items: ["Cached Skills, plugins, apps, and MCP status", "Direct local skill instruction editor"] }].map((release) => <article key={release.version}><span>{release.version}</span><h3>{release.title}</h3><ul>{release.items.map((item) => <li key={item}>{item}</li>)}</ul></article>)}
+              </div>
+              <div className="settings-block bug-report"><div className="settings-block__heading"><div><h3>Found a bug?</h3><p>Prepare a privacy-conscious GitHub report without uploading anything silently.</p></div></div>
+                <div className="settings-segmented"><button className={reportKind === "bug" ? "is-active" : ""} onClick={() => setReportKind("bug")}>Bug report</button><button className={reportKind === "feature" ? "is-active" : ""} onClick={() => setReportKind("feature")}>Feature request</button></div>
+                <label><span>Title</span><input value={reportTitle} maxLength={160} placeholder="Summarize the issue" onChange={(event) => setReportTitle(event.target.value)} /></label>
+                <label><span>Description</span><textarea value={reportDescription} placeholder="What happened, and what did you expect?" onChange={(event) => setReportDescription(event.target.value)} /></label>
+                <label className="report-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); setReportFiles([...event.dataTransfer.files].filter((file) => file.size <= 10 * 1024 * 1024).slice(0, 5)); }}><XiaoIcon name="attach" size={20} /><strong>Drop screenshots or logs</strong><small>Up to five files, 10 MB each. Xiao only records their names in the draft.</small><input type="file" multiple accept="image/*,.txt,.log" onChange={(event) => setReportFiles([...(event.target.files ?? [])].filter((file) => file.size <= 10 * 1024 * 1024).slice(0, 5))} />{reportFiles.length ? <em>{reportFiles.map((file) => file.name).join(" · ")}</em> : null}</label>
+                <button className="button button--primary report-submit" disabled={!reportTitle.trim() || !reportDescription.trim()} onClick={submitReport}>Open GitHub report</button>
+              </div>
             </section>
           )}
         </div>

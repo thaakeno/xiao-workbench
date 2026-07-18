@@ -24,6 +24,8 @@ export type AppPreferences = {
   launchBrand: "logo" | "wordmark";
   wrapCode: boolean;
   terminalPlacement: "right" | "bottom";
+  autostart: boolean;
+  autostartBackground: boolean;
   notifyCompletions: boolean;
   notifyErrors: boolean;
   notifyApprovals: boolean;
@@ -52,6 +54,8 @@ const defaults: AppPreferences = {
   launchBrand: "logo",
   wrapCode: false,
   terminalPlacement: "right",
+  autostart: false,
+  autostartBackground: true,
   notifyCompletions: true,
   notifyErrors: true,
   notifyApprovals: true,
@@ -110,6 +114,8 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
     terminalPlacement: stored.terminalPlacement === "bottom" || stored.terminalPlacement === "right"
       ? stored.terminalPlacement
       : defaults.terminalPlacement,
+    autostart: typeof stored.autostart === "boolean" ? stored.autostart : defaults.autostart,
+    autostartBackground: typeof stored.autostartBackground === "boolean" ? stored.autostartBackground : defaults.autostartBackground,
     notifyCompletions:
       typeof stored.notifyCompletions === "boolean" ? stored.notifyCompletions : defaults.notifyCompletions,
     notifyErrors: typeof stored.notifyErrors === "boolean" ? stored.notifyErrors : defaults.notifyErrors,

@@ -38,7 +38,7 @@ use runs::commands::{
     load_xiao_run_events, resolve_xiao_run_input, retry_xiao_run,
 };
 use runs::service::RunService;
-use system::commands::{check_codex_update, get_system_info, send_desktop_notification, update_codex_cli};
+use system::commands::{check_codex_update, check_xiao_update, get_autostart_settings, get_system_info, install_xiao_update, send_desktop_notification, set_autostart_settings, update_codex_cli};
 use terminal::commands::{resize_terminal, start_terminal, stop_terminal, write_terminal};
 use terminal::runtime::TerminalManager;
 use workspace::commands::{get_workspace_snapshot, list_workspace_files, read_workspace_file};
@@ -97,6 +97,9 @@ pub fn run() {
             routines::service::configure_tray(app)?;
             app.state::<RunService>().start(app.handle().clone());
             app.state::<RoutineService>().start(app.handle().clone());
+            if std::env::args_os().any(|argument| argument == "--background") {
+                if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
+            }
             Ok(())
         })
         .manage(TerminalManager::default())
@@ -109,6 +112,10 @@ pub fn run() {
             list_workspace_files,
             read_workspace_file,
             get_system_info,
+            get_autostart_settings,
+            set_autostart_settings,
+            check_xiao_update,
+            install_xiao_update,
             check_codex_update,
             update_codex_cli,
             send_desktop_notification,

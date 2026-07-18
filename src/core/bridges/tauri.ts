@@ -59,6 +59,22 @@ export const nativeBridge = {
     return invoke<CodexUpdateResult>("update_codex_cli");
   },
 
+  getAutostartSettings() {
+    return invoke<{ enabled: boolean; background: boolean }>("get_autostart_settings");
+  },
+
+  setAutostartSettings(enabled: boolean, background: boolean) {
+    return invoke<{ enabled: boolean; background: boolean }>("set_autostart_settings", { enabled, background });
+  },
+
+  checkXiaoUpdate() {
+    return invoke<{ currentVersion: string; latestVersion: string; updateAvailable: boolean; releaseName: string; releaseNotes: string; publishedAt: string; installerSize: number }>("check_xiao_update");
+  },
+
+  installXiaoUpdate() {
+    return invoke<void>("install_xiao_update");
+  },
+
   sendDesktopNotification(title: string, body: string) {
     return invoke<void>("send_desktop_notification", { title, body });
   },
